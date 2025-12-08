@@ -51,8 +51,8 @@ optional_deps = {
         "onnxruntime~=1.22.0 ; platform_machine == 'aarch64' or platform_system == 'Darwin'",
         "onnxruntime-gpu~=1.22.0 ; platform_machine != 'aarch64' and platform_system != 'Darwin' and platform_system != 'Windows'",  # noqa: E501
         "onnxruntime-directml==1.20.0; platform_system == 'Windows'",
-        "onnxscript",  # For test_onnx_dynamo_export unit test
-        "onnxsim ; python_version < '3.12' and platform_machine != 'aarch64'",
+        "onnxscript",  # For autocast opset conversion and test_onnx_dynamo_export unit test
+        "onnxslim>=0.1.76",
         "polygraphy>=0.49.22",
     ],
     "hf": [
@@ -76,6 +76,7 @@ optional_deps = {
         "coverage",
         "pytest",
         "pytest-cov",
+        "pytest-instafail",
         "pytest-timeout",
         "timm",
         "torchvision",
@@ -125,11 +126,11 @@ if __name__ == "__main__":
     setuptools.setup(
         name="nvidia-modelopt",
         version=version,
-        description="Nvidia TensorRT Model Optimizer: a unified model optimization and deployment toolkit.",
-        long_description="Checkout https://github.com/nvidia/TensorRT-Model-Optimizer for more information.",
+        description="Nvidia Model Optimizer: a unified model optimization and deployment toolkit.",
+        long_description="Checkout https://github.com/nvidia/Model-Optimizer for more information.",
         long_description_content_type="text/markdown",
         author="NVIDIA Corporation",
-        url="https://github.com/NVIDIA/TensorRT-Model-Optimizer",
+        url="https://github.com/NVIDIA/Model-Optimizer",
         license="Apache 2.0",
         license_files=("LICENSE_HEADER",),
         classifiers=[

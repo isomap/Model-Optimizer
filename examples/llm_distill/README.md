@@ -11,10 +11,11 @@ This section focuses on demonstrating how to apply Model Optimizer to perform kn
 | **Section** | **Description** | **Link** | **Docs** |
 | :------------: | :------------: | :------------: | :------------: |
 | Pre-Requisites | Required & optional packages to use this technique | \[[Link](#pre-requisites)\] | |
-| Getting Started | Learn how to optimize your models using distillation to produce more intellegant smaller models | \[[Link](#getting-started)\] | \[[docs](https://nvidia.github.io/TensorRT-Model-Optimizer/guides/4_distillation.html)\] |
+| Getting Started | Learn how to optimize your models using distillation to produce more intellegant smaller models | \[[Link](#getting-started)\] | \[[docs](https://nvidia.github.io/Model-Optimizer/guides/4_distillation.html)\] |
 | Support Matrix | View the support matrix to see compatibility and feature availability across different models | \[[Link](#support-matrix)\] | |
-| Distillation with NeMo | Learn how to distill your models with NeMo Framework | \[[Link](#knowledge-distillation-kd-for-nvidia-nemo-models)\] | \[[docs](https://nvidia.github.io/TensorRT-Model-Optimizer/guides/4_distillation.html)\] |
-| Distillation with Huggingface | Learn how to distill your models with Hugging Face | \[[Link](#knowledge-distillation-kd-for-huggingface-models)\] | \[[docs](https://nvidia.github.io/TensorRT-Model-Optimizer/guides/4_distillation.html)\] |
+| Distillation with Megatron-LM | Learn how to distill your models with Megatron-LM Framework | \[[Link](#knowledge-distillation-kd-in-nvidia-megatron-lm-framework)\] | |
+| Distillation with NeMo | Learn how to distill your models with NeMo Framework | \[[Link](#knowledge-distillation-kd-in-nvidia-nemo-framework)\] | \[[docs](https://nvidia.github.io/Model-Optimizer/guides/4_distillation.html)\] |
+| Distillation with Huggingface | Learn how to distill your models with Hugging Face | \[[Link](#knowledge-distillation-kd-for-huggingface-models)\] | \[[docs](https://nvidia.github.io/Model-Optimizer/guides/4_distillation.html)\] |
 | Resources | Extra links to relevant resources | \[[Link](#resources)\] | |
 | NeMo Prune + Distill Simplified Flow | Example script demonstrating end-to-end pruning plus distillation in NeMo | \[[Link](../nemo_run/prune_distill/README.md)\] | |
 
@@ -25,8 +26,8 @@ This section focuses on demonstrating how to apply Model Optimizer to perform kn
 ### Docker
 
 For Hugging Face models, please use the PyTorch docker image (e.g., `nvcr.io/nvidia/pytorch:25.06-py3`).
-For NeMo models, use the NeMo container (e.g., `nvcr.io/nvidia/nemo:25.07`) which has all the dependencies installed.
-Visit our [installation docs](https://nvidia.github.io/TensorRT-Model-Optimizer/getting_started/2_installation.html) for more information.
+For NeMo models, use the NeMo container (e.g., `nvcr.io/nvidia/nemo:25.09`) which has all the dependencies installed.
+Visit our [installation docs](https://nvidia.github.io/Model-Optimizer/getting_started/2_installation.html) for more information.
 
 Also follow the installation steps below to upgrade to the latest version of Model Optimizer and install example-specific dependencies.
 
@@ -73,7 +74,7 @@ distillation_model = mtd.convert(student_model, mode=[("kd_loss", distillation_c
 
 The `teacher_model` can be either a `nn.Module`, a callable which returns an `nn.Module`, or a tuple of `(model_cls, args, kwargs)`. The `criterion` is the distillation loss used between student and teacher tensors. The `loss_balancer` determines how the original and distillation losses are combined (if needed).
 
-See [Distillation](https://nvidia.github.io/TensorRT-Model-Optimizer/guides/4_distillation.html) for more info.
+See [Distillation](https://nvidia.github.io/Model-Optimizer/guides/4_distillation.html) for more info.
 
 ### Distill during training
 
@@ -141,9 +142,13 @@ Loss balancers:
 | Qwen 3 | qwen3 | ✅ |
 | Mamba | mamba | ✅ |
 
-## Knowledge Distillation (KD) for NVIDIA NeMo Models
+## Knowledge Distillation (KD) in NVIDIA Megatron-LM Framework
 
-Checkout the stand-alone distillation script in the [NVIDIA NeMo repository](https://docs.nvidia.com/nemo-framework/user-guide/latest/model-optimization/distillation/distillation.html).
+Checkout the Knowledge Distillation example in the [Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM/tree/main/examples/post_training/modelopt).
+
+## Knowledge Distillation (KD) in NVIDIA NeMo Framework
+
+Checkout the stand-alone distillation script in the [NeMo documentation](https://docs.nvidia.com/nemo-framework/user-guide/latest/model-optimization/distillation/distillation.html).
 
 You can also look at the NeMo tutorial notebooks [here](https://github.com/NVIDIA-NeMo/NeMo/tree/main/tutorials/llm/qwen/pruning-distillation) which showcase the usage of Minitron pruning followed by distillation for Qwen 3 8B step-by-step in NeMo framework. Hugging Face models can also be converted to NeMo format and used subsequently as shown in the tutorial.
 
@@ -172,9 +177,9 @@ accelerate launch --config-file ./accelerate_config/fsdp2.yaml \
 
 ## Resources
 
-- 📅 [Roadmap](https://github.com/NVIDIA/TensorRT-Model-Optimizer/issues/146)
-- 📖 [Documentation](https://nvidia.github.io/TensorRT-Model-Optimizer)
+- 📅 [Roadmap](https://github.com/NVIDIA/Model-Optimizer/issues/146)
+- 📖 [Documentation](https://nvidia.github.io/Model-Optimizer)
 - 🎯 [Benchmarks](../benchmark.md)
-- 💡 [Release Notes](https://nvidia.github.io/TensorRT-Model-Optimizer/reference/0_changelog.html)
-- 🐛 [File a bug](https://github.com/NVIDIA/TensorRT-Model-Optimizer/issues/new?template=1_bug_report.md)
-- ✨ [File a Feature Request](https://github.com/NVIDIA/TensorRT-Model-Optimizer/issues/new?template=2_feature_request.md)
+- 💡 [Release Notes](https://nvidia.github.io/Model-Optimizer/reference/0_changelog.html)
+- 🐛 [File a bug](https://github.com/NVIDIA/Model-Optimizer/issues/new?template=1_bug_report.md)
+- ✨ [File a Feature Request](https://github.com/NVIDIA/Model-Optimizer/issues/new?template=2_feature_request.md)
