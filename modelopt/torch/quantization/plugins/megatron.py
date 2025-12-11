@@ -684,8 +684,8 @@ if HAS_TE:
                 if isinstance(v, torch.Tensor) and v is not None and "_quantizer" not in k:
                     sharded_state_dict[prefix + k] = v
             print_rank_0(f"sharded_state_dict should have extra_state: {sharded_state_dict}")
-            tmp_state = sharded_state_dict["decoder.layers.5.self_attention.core_attention._extra_state"]
-            print_rank_0(f"unserialized extra_state: {pickle.loads(tmp_state.detach().cpu().numpy().tobytes())}")
+            #tmp_state = sharded_state_dict["decoder.layers.5.self_attention.core_attention._extra_state"]
+            #print_rank_0(f"unserialized extra_state: {pickle.loads(tmp_state.detach().cpu().numpy().tobytes())}")
 
             # Process _amax in bmm_quantizers
             for name, quantizer in [
