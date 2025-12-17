@@ -288,7 +288,7 @@ class ParallelDraft(MegatronModule):
             x_head = x
             for layer in head:
                 x_head, _ = layer(x_head)
-            output.append(self.lm_head(x_head))
+            output.append(self.lm_head(x_head)[0])
         return output
 
     def sharded_state_dict(
