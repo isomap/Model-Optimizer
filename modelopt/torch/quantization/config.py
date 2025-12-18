@@ -997,7 +997,7 @@ class QuantizerAttributeConfig(ModeloptBaseConfig):
     @field_validator("block_sizes", mode="before")
     @classmethod
     def tuple_block_sizes_scale_bits(cls, v) -> int | tuple[int, int]:
-        """Convert num_bits to tuple if list."""
+        """Convert block_sizes.scale_bits to tuple if list."""
         if v and v.get("scale_bits"):
             scale_bits = v.get("scale_bits")
             if isinstance(scale_bits, list):
