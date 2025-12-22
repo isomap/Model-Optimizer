@@ -15,7 +15,6 @@
 
 """Support quantization for megatron linear layers."""
 
-import pickle
 import logging
 import warnings
 from typing import Any

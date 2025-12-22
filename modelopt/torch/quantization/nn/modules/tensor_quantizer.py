@@ -934,8 +934,8 @@ class TensorQuantizer(nn.Module):
             # DISABLED: This check causes illegal memory access in distributed training
             # The tensor appears to be corrupted upstream, before reaching the quantizer
             # TODO: Investigate tensor corruption in attention mechanism
-            # if hasattr(inputs, "is_contiguous") and not inputs.is_contiguous():
-            #     inputs = inputs.contiguous()
+            if hasattr(inputs, "is_contiguous") and not inputs.is_contiguous():
+                inputs = inputs.contiguous()
             if self.fake_quant:
                 outputs = self._fake_quantize(inputs)
             elif not self._dequantize:
