@@ -768,6 +768,25 @@ class EagleMoEBalancer(TrainerCallback):
                     gate.get_e_score_correction_bias(),
                     gate.e_score_correction_bias_temp_acc.data
                 )
+                # Log all violations individually as scalars
+                for i, v in enumerate(violations):
+                    self.tb_writer.add_scalar(
+                        f"moe/violation_expert_{i}",
+                        v.item(),
+                        state.global_step,
+                    )
+                for i, b in enumerate(gate.get_e_score_correction_bias()):
+                    self.tb_writer.add_scalar(
+                        f"moe/bias_expert_{i}",
+                        b.item(),
+                        state.global_step,
+                    )
+                for i, u in enumerate(gate.e_score_correction_bias_temp_acc.data):
+                    self.tb_writer.add_scalar(
+                        f"moe/temp_usage_expert_{i}",
+                        u.item(),
+                        state.global_step,
+                    )
 
             # 3. SCALARS: Track the worst case
             self.tb_writer.add_scalar(

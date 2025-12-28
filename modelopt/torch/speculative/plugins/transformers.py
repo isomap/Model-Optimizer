@@ -207,8 +207,7 @@ DS_CONFIG_FOR_NEMOTRON = {
     "topk_group": 1,
     "norm_topk_prob": True,
     "routed_scaling_factor": 2.5,
-    "bias_update_speed": 0.001,
-    "moe_balancing_loss_weight": 0.0001,
+    "bias_update_speed": 0.01,
 }
 
 import torch.nn.functional as F
@@ -237,36 +236,29 @@ class DeepseekV3TopkRouter(nn.Module):
 
         self.weight = nn.Linear(config.hidden_size, self.n_routed_experts, bias=False, dtype=torch.float32)
 
-        # Temp accumulator for expert score correction bias between update steps
-        self.register_buffer("e_score_correction_bias_temp_acc", torch.zeros(self.n_routed_experts, dtype=torch.int64))
-        # Total net bias count for each expert. Tracking done in int64 to avoid accumulation errors.
-        self.register_buffer("e_score_correction_bias_total_count", torch.zeros(self.n_routed_experts, dtype=torch.int64))
-        # Bias scores calculated using the update speed
-        self.register_buffer("e_score_correction_bias_factor", torch.zeros(self.n_routed_experts, dtype=torch.float32))
+        with torch.autocast(device_type="cuda", enabled=False):
+            # Temp accumulator for expert score correction bias between update steps
+            self.register_buffer("e_score_correction_bias_temp_acc", torch.zeros(self.n_routed_experts, dtype=torch.int64))
+            # Bias scores calculated using the update speed
+            self.register_buffer("e_score_correction_bias_factor", torch.zeros(self.n_routed_experts, dtype=torch.float32))
 
     def clear_temp_correction_accumulator(self):
         self.e_score_correction_bias_temp_acc.data.zero_()
 
     def apply_bias_update(self):
-        expert_usage_counts = self.e_score_correction_bias_temp_acc.data
-        total_selections = expert_usage_counts.sum().item()
-        usage_fraction = expert_usage_counts.to(torch.float32) / (total_selections + 1e-20)
-        target_fraction = 1.0 / self.n_routed_experts
+        with torch.autocast(device_type="cuda", enabled=False):
+            if self.e_score_correction_bias_factor.dtype != torch.float32:
+                self.e_score_correction_bias_factor = self.e_score_correction_bias_factor.float()
+            expert_usage_counts = self.e_score_correction_bias_temp_acc.data
+            total_selections = expert_usage_counts.sum().item()
+            usage_fraction = expert_usage_counts.to(torch.float32) / (total_selections + 1e-20)
+            target_fraction = 1.0 / self.n_routed_experts
 
-        error = usage_fraction - target_fraction
-        self.e_score_correction_bias_total_count.data -= error.sign().to(torch.int64)
-        min_count = self.e_score_correction_bias_total_count.data.min().item()
-        if min_count > 0:
-            # Prevent unbounded growth of the bias counts
-            self.e_score_correction_bias_total_count.data -= min_count
-        max_bias_magnitude = 1.0 / self.bias_update_speed
-        new_bias_scores = self.bias_update_speed * \
-            torch.clamp(self.e_score_correction_bias_total_count.data.to(torch.float32),
-                        None, max_bias_magnitude)
-        self.e_score_correction_bias_factor.data[:] = new_bias_scores
+            error = usage_fraction - target_fraction
+            self.e_score_correction_bias_factor.data -= (self.bias_update_speed * error.to(torch.float32)).to(torch.float32)
 
-        violation = error / target_fraction
-        return violation
+            violation = error / target_fraction
+            return violation
 
     def get_e_score_correction_bias(self):
         return self.e_score_correction_bias_factor.data
@@ -347,56 +339,46 @@ class DeepseekV3MoE(nn.Module):
         self.top_k = DS_CONFIG_FOR_NEMOTRON["num_experts_per_tok"]
 
     def route_tokens_to_experts(self, router_logits):
-        router_probs = router_logits.to(torch.float32).softmax(dim=-1)
-        router_logits = router_logits.to(torch.float32).sigmoid()
-        router_logits_for_choice = router_logits.to(torch.float32) + self.gate.get_e_score_correction_bias()
-        group_scores = (
-            router_logits_for_choice.view(-1, self.n_group, self.n_routed_experts // self.n_group)
-            .topk(2, dim=-1)[0]
-            .sum(dim=-1)
-        )
-        group_idx = torch.topk(group_scores, k=self.topk_group, dim=-1, sorted=False)[1]
-        group_mask = torch.zeros_like(group_scores)
-        group_mask.scatter_(1, group_idx, 1)
-        score_mask = (
-            group_mask.unsqueeze(-1)
-            .expand(-1, self.n_group, self.n_routed_experts // self.n_group)
-            .reshape(-1, self.n_routed_experts)
-        )
-        scores_for_choice = router_logits_for_choice.masked_fill(~score_mask.bool(), 0.0)
-        topk_indices = torch.topk(scores_for_choice, k=self.top_k, dim=-1, sorted=False)[1]
-        topk_weights = router_logits.gather(1, topk_indices)
-        load_balancing_loss = None
-        if self.training:
-            # Update expert score correction bias
-            # 1. Calculate actual expert usage in this batch
-            # Shape: (batch_size * seq_len, top_k) -> flattened
-            with torch.no_grad():
-                chosen_experts = topk_indices.flatten()
-                # Count how many times each expert was selected
-                expert_usage = torch.bincount(
-                    chosen_experts, 
-                    minlength=self.n_routed_experts
-                )
-                fraction_of_tokens_per_expert = expert_usage.to(torch.float32) / router_logits.shape[0]
+        with torch.autocast(device_type="cuda", enabled=False):
+            router_logits = router_logits.to(torch.float32).sigmoid()
+            router_logits_for_choice = router_logits.to(torch.float32) + self.gate.get_e_score_correction_bias().to(torch.float32)
+            group_scores = (
+                router_logits_for_choice.view(-1, self.n_group, self.n_routed_experts // self.n_group)
+                .topk(2, dim=-1)[0]
+                .sum(dim=-1)
+            )
+            group_idx = torch.topk(group_scores, k=self.topk_group, dim=-1, sorted=False)[1]
+            group_mask = torch.zeros_like(group_scores)
+            group_mask.scatter_(1, group_idx, 1)
+            score_mask = (
+                group_mask.unsqueeze(-1)
+                .expand(-1, self.n_group, self.n_routed_experts // self.n_group)
+                .reshape(-1, self.n_routed_experts)
+            )
+            scores_for_choice = router_logits_for_choice.masked_fill(~score_mask.bool(), 0.0)
+            topk_indices = torch.topk(scores_for_choice, k=self.top_k, dim=-1, sorted=False)[1]
+            topk_weights = router_logits.gather(1, topk_indices)
+            if self.training:
+                # Update expert score correction bias
+                # 1. Calculate actual expert usage in this batch
+                # Shape: (batch_size * seq_len, top_k) -> flattened
+                with torch.no_grad():
+                    chosen_experts = topk_indices.flatten()
+                    # Count how many times each expert was selected
+                    expert_usage = torch.bincount(
+                        chosen_experts, 
+                        minlength=self.n_routed_experts
+                    )
 
-            # Compute per-worker load-balancing loss
-            gate_probs_mean_per_expert = router_probs.mean(dim=0)
-            assert gate_probs_mean_per_expert.shape == fraction_of_tokens_per_expert.shape, \
-                f"Shape mismatch: {gate_probs_mean_per_expert.shape} vs {fraction_of_tokens_per_expert.shape}"
-            load_balancing_loss = torch.sum(
-                gate_probs_mean_per_expert.to(torch.float32) * fraction_of_tokens_per_expert.to(torch.float32)
-            ) * DS_CONFIG_FOR_NEMOTRON["moe_balancing_loss_weight"] / DS_CONFIG_FOR_NEMOTRON["n_routed_experts"]
-
-            if torch.distributed.is_initialized():
-                torch.distributed.all_reduce(expert_usage, op=torch.distributed.ReduceOp.SUM)
-            
-            self.gate.e_score_correction_bias_temp_acc.data += expert_usage.to(torch.int64)
-        if self.norm_topk_prob:
-            denominator = topk_weights.sum(dim=-1, keepdim=True) + 1e-20
-            topk_weights /= denominator
-        topk_weights = topk_weights * self.routed_scaling_factor
-        return topk_indices, topk_weights, load_balancing_loss
+                if torch.distributed.is_initialized():
+                    torch.distributed.all_reduce(expert_usage, op=torch.distributed.ReduceOp.SUM)
+                
+                self.gate.e_score_correction_bias_temp_acc.data += expert_usage.to(torch.int64)
+            if self.norm_topk_prob:
+                denominator = topk_weights.sum(dim=-1, keepdim=True) + 1e-20
+                topk_weights /= denominator
+            topk_weights = topk_weights * self.routed_scaling_factor
+            return topk_indices, topk_weights, None
 
     def forward(self, hidden_states):
         residuals = hidden_states
@@ -795,7 +777,7 @@ class HFEagleModel(EagleModel):
         # https://github.com/huggingface/transformers/blob/v4.56-release/src/transformers/trainer.py#L566
         self.is_quantized = False
 
-        self.num_ttt_steps = 3  # NOTE: (hg) hardcoded for now. Should add to cfg.
+        self.num_ttt_steps = 7  # NOTE: (hg) hardcoded for now. Should add to cfg.
         self._cached_attn_blk_masks = {}
 
     def _get_ttt_attention_mask(self, seq_length, ttt_step):

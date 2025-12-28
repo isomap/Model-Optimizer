@@ -237,6 +237,12 @@ def train():
             tokenizer, data_args, max_length=training_args.training_seq_len
         )
 
+    lr_kwargs = {"min_lr": 1e-4}
+    if isinstance(training_args.lr_scheduler_kwargs, dict):
+        training_args.lr_scheduler_kwargs.update(lr_kwargs)
+    else:
+        training_args.lr_scheduler_kwargs = lr_kwargs
+
     callbacks = []
     tb_writer = None
     if "tensorboard" in training_args.report_to:
