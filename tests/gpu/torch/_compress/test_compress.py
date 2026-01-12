@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -83,13 +84,7 @@ def _test_compress_multiprocess_job(project_root_path: Path, tmp_path: Path, ran
         assert solution_0_filepath.exists()
 
         # assertions for the mip_and_realize_models step 6
-        solution_0_ckpt_config_path = (
-            puzzle_dir
-            / "mip/puzzle_solutions/target_memory_780000MiB/solutions--checkpoints/solution_0/config.json"
-        )
-
-        assert solution_0_ckpt_config_path.exists()
-        assert (puzzle_dir / "mip/puzzle_solutions/target_memory_780000MiB/solutions.json").exists()
+        _assert_mip_solutions(puzzle_dir)
 
     dist.cleanup()
 
@@ -119,3 +114,24 @@ def _assert_score_pruning_activations(puzzle_dir: Path):
     layer_1 = pruning_scores[layer_names[1]]
     assert layer_1["score"][0].item() == 269
     assert layer_1["channels_importance_ascending"][0].item() == 366
+
+
+def _assert_mip_solutions(puzzle_dir: Path):
+    """Assertions for the mip_and_realize_models step."""
+    mip_dir = puzzle_dir / "mip/puzzle_solutions/target_memory_780000MiB"
+
+    assert (mip_dir / "solutions.json").exists()
+    assert (mip_dir / "solutions--checkpoints/solution_0/config.json").exists()
+
+    # Check lm_loss value from solution validation
+    solution_0_path = (
+        puzzle_dir / "single_sequence_replacement_solutions--validation/solution_0.json"
+    )
+    with open(solution_0_path) as f:
+        validation = json.load(f)
+
+    expected_lm_loss = 4.53060245513916
+    actual_lm_loss = validation["lm_loss"]["avg"]
+    assert abs(actual_lm_loss - expected_lm_loss) < 0.01, (
+        f"lm_loss mismatch: expected {expected_lm_loss}, got {actual_lm_loss}"
+    )
