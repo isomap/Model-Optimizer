@@ -86,6 +86,8 @@ class Printer:
 
 def _process_single_layer(
     layer_idx: int,
+    pruning_mixin,
+    descriptor,
     parent_state_dict: dict,
     new_state_dict: dict,
     original_config: DeciLMConfig,
@@ -104,8 +106,32 @@ def _process_single_layer(
     Process a single layer in parallel. Returns (layer_state_dict, keys_to_remove).
     Thread-safe function for parallel layer processing.
     """
-    layer_out_state_dict = {}
     keys_to_remove = {}
+    layer_out_state_dict = {}
+
+    # Delegate to pruning_mixin if available
+    if pruning_mixin is not None:
+        _layer_out = pruning_mixin.prune_single_layer(
+            layer_idx=layer_idx,
+            parent_state_dict=parent_state_dict,
+            new_state_dict=new_state_dict,
+            original_config=original_config,
+            new_config=new_config,
+            gqa_init_mode=gqa_init_mode,
+            mlp_init_mode=mlp_init_mode,
+            mlp_init_config=mlp_init_config,
+            linear_init_mode=linear_init_mode,
+            ignored_keys=ignored_keys,
+            keys=keys,
+            is_original_mha=is_original_mha,
+            head_size=head_size,
+            hidden_size=hidden_size,
+            keys_to_remove=keys_to_remove,
+        )
+        layer_out_state_dict.update(_layer_out)
+        return layer_out_state_dict, keys_to_remove
+
+    # Legacy inline processing (fallback when no pruning_mixin)
 
     parent_block_config = original_config.block_configs[layer_idx]
     child_block_config = new_config.block_configs[layer_idx]
@@ -324,6 +350,8 @@ def _process_single_layer(
 
 @torch.no_grad()
 def create_child_state_dict(
+    pruning_mixin,
+    descriptor,
     original_state_dict: dict,
     new_state_dict: dict,
     original_config: DeciLMConfig,
@@ -411,6 +439,8 @@ def create_child_state_dict(
     # Prepare arguments for parallel processing
     process_layer_partial = partial(
         _process_single_layer,
+        pruning_mixin=pruning_mixin,
+        descriptor=descriptor,
         parent_state_dict=original_state_dict,
         new_state_dict=new_state_dict,
         original_config=original_config,
@@ -685,7 +715,9 @@ def _init_mlp(
             if mlp_key in new_state_dict.keys():
                 mlp_module_weight, pruned_filters, projection_matrix = _init_mlp_module(
                     mlp_init_mode,
+                    mlp_prefix,
                     expanded_dim,
+                    layer_idx,
                     new_state_dict[mlp_key],
                     new_config,
                     original_state_dict[mlp_key],
@@ -693,7 +725,6 @@ def _init_mlp(
                     mlp_init_config,
                     pruned_filters,
                     projection_matrix,
-                    mlp_prefix,
                 )
                 out_state_dict[mlp_key] = mlp_module_weight
             else:
@@ -703,7 +734,9 @@ def _init_mlp(
 
 def _init_mlp_module(
     mlp_init_mode: Union[MlpInitMode, str],
+    mlp_prefix: str,
     expanded_dim: int,
+    layer_idx: int,
     new_item: torch.Tensor,
     new_config: DeciLMConfig,
     orig_item: torch.Tensor,
@@ -711,7 +744,6 @@ def _init_mlp_module(
     mlp_init_config: Optional[dict[str, Any]],
     pruned_filters: Optional[torch.Tensor] = None,
     projection_matrix: Optional[dict[str, torch.Tensor]] = None,
-    mlp_prefix: Optional[str] = None,
 ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[dict[str, torch.Tensor]]]:
     if isinstance(mlp_init_mode, str):
         mlp_init_mode = MlpInitMode(mlp_init_mode)
@@ -722,19 +754,19 @@ def _init_mlp_module(
         f"({new_config.num_hidden_layers=}) != ({original_config.num_hidden_layers=})"
     )
 
-    orig_ffn_size = orig_item.shape[expanded_dim]
-    new_ffn_size = new_item.shape[expanded_dim]
+    new_intermediate_size = new_config.block_configs[layer_idx].ffn.intermediate_size
+    original_intermediate_size = original_config.block_configs[layer_idx].ffn.intermediate_size
 
     if mlp_init_mode == MlpInitMode.CopyAsIs:
-        assert new_ffn_size == orig_ffn_size, (
-            f"({new_ffn_size=}) != ({orig_ffn_size=}), can't be copied as is."
+        assert new_intermediate_size == original_intermediate_size, (
+            f"({new_intermediate_size=}) != ({original_intermediate_size=}), can't be copied as is."
         )
         mlp_module_weight = orig_item
 
     elif mlp_init_mode == MlpInitMode.Random:
         mlp_module_weight = new_item
 
-    elif new_ffn_size == orig_ffn_size:
+    elif new_intermediate_size == original_intermediate_size:
         mlp_module_weight = orig_item
 
     elif mlp_init_mode in (
@@ -742,9 +774,11 @@ def _init_mlp_module(
         MlpInitMode.PruneByActivationsLog,
         MlpInitMode.MoEChannelPruning,
     ):
-        assert new_ffn_size <= orig_ffn_size, (
-            f"({new_ffn_size=}) > ({orig_ffn_size=}), can't be truncated."
+        assert original_intermediate_size >= new_intermediate_size, (
+            f"({original_intermediate_size=}) < ({new_intermediate_size=}), can't be truncated."
         )
+        orig_ffn_size = orig_item.shape[expanded_dim]
+        new_ffn_size = new_item.shape[expanded_dim]
 
         if mlp_init_mode == MlpInitMode.Truncate:
             truncated_weight = torch.narrow(
@@ -768,8 +802,8 @@ def _init_mlp_module(
     elif (
         mlp_init_mode == MlpInitMode.ExpertRemoval
     ):  # the case of mlp layers of maverick. for now we only support copy as is
-        assert new_ffn_size == orig_ffn_size, (
-            f"({new_ffn_size=}) != ({orig_ffn_size=}), can't be copied as is."
+        assert new_intermediate_size == original_intermediate_size, (
+            f"({new_intermediate_size=}) != ({original_intermediate_size=}), can't be copied as is."
         )
         mlp_module_weight = orig_item
 

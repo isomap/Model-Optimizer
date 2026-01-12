@@ -17,7 +17,8 @@
 """Llama model descriptor for AnyModel compression."""
 
 import re
-from typing import Dict
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 from transformers.models.llama.modeling_llama import (
     LlamaDecoderLayer,
@@ -35,6 +36,9 @@ from modelopt.torch._compress.anymodel.puzzformer.no_op import (
     return_tuple_of_size,
 )
 from modelopt.torch._compress.decilm.deci_lm_hf_code.block_config import BlockConfig
+from modelopt.torch._compress.pruning.ffn_intermediate_pruning_mixin import (
+    FFNIntermediateLayerDescriptor,
+)
 
 
 @ModelDescriptorFactory.register_decorator("llama")
@@ -114,3 +118,14 @@ class LlamaModelDescriptor(ModelDescriptor):
 
         layer_name_patterns.update(**build_ffn_predicates(), **build_attention_predicates())
         return layer_name_patterns
+
+
+@dataclass
+class LlamaFFNIntermediateLayerDescriptor(FFNIntermediateLayerDescriptor):
+    """Layer descriptor for Llama FFN intermediate pruning."""
+
+    down_proj_name: str = "mlp.down_proj"
+    ffn_prefix_name: str = "model.layers.{layer_idx}.mlp"
+    linear_weight_names: List[str] = field(
+        default_factory=lambda: ["down_proj", "gate_proj", "up_proj"]
+    )

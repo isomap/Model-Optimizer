@@ -142,6 +142,8 @@ def init_child_from_parent(
     mprint("Starting create_child_state_dict...")
     start_time = time.time()
     child_state_dict = create_child_state_dict(
+        pruning_mixin=pruning_mixin,
+        descriptor=descriptor,
         original_state_dict=parent_state_dict,
         new_state_dict=child_state_dict_with_meta_tensors,
         original_config=parent_model_config,

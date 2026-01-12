@@ -25,7 +25,6 @@ import os
 import time
 from typing import Optional
 
-import hydra
 from omegaconf import DictConfig
 
 from modelopt.torch._compress.tools.bypassed_training.child_init import (

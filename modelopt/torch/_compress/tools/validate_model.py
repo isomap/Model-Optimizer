@@ -48,7 +48,9 @@ from modelopt.torch._compress.tools.sharded_checkpoint_utils import (
     set_submodule,
 )
 from modelopt.torch._compress.utils.data.dataloaders import create_validation_dataloader
-from modelopt.torch._compress.utils.parsing import simple_parse_args_string
+from modelopt.torch._compress.utils.parsing import (
+    simple_parse_args_string,  # noqa: F401 (kept for backwards compat)
+)
 from modelopt.torch._compress.utils.validate_runtime_pipeline import (
     HiddenStatesAndLMHead,
     calculate_losses_pipeline,
@@ -147,16 +149,16 @@ def validate_model(
     activation_hooks = None
 
     if args.activations_log_dir is not None:
-        activation_hooks_kwargs = (
-            simple_parse_args_string(args.activation_hooks_kwargs)
-            if isinstance(args.activation_hooks_kwargs, str)
-            else args.activation_hooks_kwargs
-        )
+        activation_hooks_kwargs = args.activation_hooks_kwargs or {}
         activation_hooks_kwargs["validation_full_iters"] = validation_full_iters
+        hook_class = args.hook_class
 
-        # Create activation hooks first
-        activation_hooks, hook_class = register_activation_hooks(
-            model=model, activation_hooks_kwargs=activation_hooks_kwargs
+        # Create activation hooks using pruning mixin
+        activation_hooks = register_activation_hooks(
+            model=model,
+            activation_hooks_kwargs=activation_hooks_kwargs,
+            hook_class=hook_class,
+            pruning_mixin=args.pruning_mixin,
         )
 
         # Create checkpoint manager with hooks
