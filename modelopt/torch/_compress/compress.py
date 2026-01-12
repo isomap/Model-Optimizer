@@ -20,6 +20,7 @@ using MIP-based NAS search algorithm.
 
 """
 
+import hydra
 from omegaconf import DictConfig
 
 import modelopt.torch._compress.activation_scoring.score_pruning_activations as score_pruning_activations
@@ -56,6 +57,7 @@ def compress(
             f"dataset_path={dataset_path}",
         ],
     )
+    hydra_cfg = hydra.utils.instantiate(hydra_cfg)
 
     # Step 1: score_pruning_activations (distributed processing)
     score_pruning_activations.launch_score_activations(hydra_cfg)
