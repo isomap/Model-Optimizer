@@ -31,20 +31,29 @@
 
 import contextlib
 import copy
-from typing import Any, Optional, Unpack
+from typing import Any, Literal, Unpack
 
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-from transformers import Cache, DynamicCache, GradientCheckpointingLayer, LlamaConfig, PretrainedConfig, PreTrainedModel
+from transformers import (
+    Cache,
+    DynamicCache,
+    GradientCheckpointingLayer,
+    LlamaConfig,
+    PretrainedConfig,
+    PreTrainedModel,
+)
+from transformers.activations import ACT2FN
 from transformers.models.llama.modeling_llama import (
+    ALL_ATTENTION_FUNCTIONS,
     LlamaAttention,
     LlamaDecoderLayer,
     LlamaRMSNorm,
     LlamaRotaryEmbedding,
+    rotate_half,
 )
-from transformers.activations import ACT2FN
 from transformers.trainer_pt_utils import LabelSmoother
 from transformers.utils import ModelOutput, TransformersKwargs
 
@@ -176,8 +185,9 @@ class HFMedusaModel(MedusaModel):
             attentions=outputs.attentions,
         )
 
+
 class LlamaMLP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, use_context_proj: bool):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -185,14 +195,21 @@ class LlamaMLP(nn.Module):
         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
-        self.context_down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
         self.act_fn = ACT2FN[config.hidden_act]
+
+        self.use_context_proj = use_context_proj
+        if self.use_context_proj:
+            self.context_down_proj = nn.Linear(
+                self.intermediate_size, self.hidden_size, bias=config.mlp_bias
+            )
 
     def forward(self, x):
         inter_states = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
         token_out_h = self.down_proj(inter_states)
-        return token_out_h, token_out_h, None
-        context_out_h = self.context_down_proj(inter_states)
+        if not self.use_context_proj:
+            context_out_h = token_out_h
+        else:
+            context_out_h = self.context_down_proj(inter_states)
         return token_out_h, context_out_h, None
 
 
@@ -210,10 +227,9 @@ DS_CONFIG_FOR_NEMOTRON = {
     "bias_update_speed": 0.01,
 }
 
-import torch.nn.functional as F
 
 class DeepseekV3MLP(nn.Module):
-    def __init__(self, config, intermediate_size):
+    def __init__(self, config, intermediate_size, use_context_proj: bool):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -221,11 +237,20 @@ class DeepseekV3MLP(nn.Module):
         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
+        self.use_context_proj = use_context_proj
+        if self.use_context_proj:
+            self.context_down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
-        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        return down_proj
+        inter_states = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+        out_states = self.down_proj(inter_states)
+        if self.use_context_proj:
+            context_out = self.context_down_proj(inter_states)
+        else:
+            context_out = out_states
+        return out_states, context_out
+
 
 class DeepseekV3TopkRouter(nn.Module):
     def __init__(self, config):
@@ -234,13 +259,21 @@ class DeepseekV3TopkRouter(nn.Module):
         self.n_routed_experts = DS_CONFIG_FOR_NEMOTRON["n_routed_experts"]
         self.bias_update_speed = DS_CONFIG_FOR_NEMOTRON["bias_update_speed"]
 
-        self.weight = nn.Linear(config.hidden_size, self.n_routed_experts, bias=False, dtype=torch.float32)
+        self.weight = nn.Linear(
+            config.hidden_size, self.n_routed_experts, bias=False, dtype=torch.float32
+        )
 
         with torch.autocast(device_type="cuda", enabled=False):
             # Temp accumulator for expert score correction bias between update steps
-            self.register_buffer("e_score_correction_bias_temp_acc", torch.zeros(self.n_routed_experts, dtype=torch.int64))
+            self.register_buffer(
+                "e_score_correction_bias_temp_acc",
+                torch.zeros(self.n_routed_experts, dtype=torch.int64),
+            )
             # Bias scores calculated using the update speed
-            self.register_buffer("e_score_correction_bias_factor", torch.zeros(self.n_routed_experts, dtype=torch.float32))
+            self.register_buffer(
+                "e_score_correction_bias_factor",
+                torch.zeros(self.n_routed_experts, dtype=torch.float32),
+            )
 
     def clear_temp_correction_accumulator(self):
         self.e_score_correction_bias_temp_acc.data.zero_()
@@ -255,7 +288,9 @@ class DeepseekV3TopkRouter(nn.Module):
             target_fraction = 1.0 / self.n_routed_experts
 
             error = usage_fraction - target_fraction
-            self.e_score_correction_bias_factor.data -= (self.bias_update_speed * error.to(torch.float32)).to(torch.float32)
+            self.e_score_correction_bias_factor.data -= (
+                self.bias_update_speed * error.to(torch.float32)
+            ).to(torch.float32)
 
             violation = error / target_fraction
             return violation
@@ -272,19 +307,31 @@ class DeepseekV3TopkRouter(nn.Module):
 class DeepseekV3NaiveMoe(nn.Module):
     """Collection of expert weights stored as 3D tensors."""
 
-    def __init__(self, config):
+    def __init__(self, config, use_context_proj: bool):
         super().__init__()
         self.num_experts = DS_CONFIG_FOR_NEMOTRON["n_routed_experts"]
         self.hidden_dim = config.hidden_size
         self.intermediate_dim = DS_CONFIG_FOR_NEMOTRON["moe_intermediate_size"]
-        self.gate_up_projections = nn.ModuleList([
-            nn.Linear(self.hidden_dim, 2 * self.intermediate_dim, bias=False)
-            for _ in range(self.num_experts)
-        ])
-        self.down_projections = nn.ModuleList([
-            nn.Linear(self.intermediate_dim, self.hidden_dim, bias=False)
-            for _ in range(self.num_experts)
-        ])
+        self.gate_up_projections = nn.ModuleList(
+            [
+                nn.Linear(self.hidden_dim, 2 * self.intermediate_dim, bias=False)
+                for _ in range(self.num_experts)
+            ]
+        )
+        self.down_projections = nn.ModuleList(
+            [
+                nn.Linear(self.intermediate_dim, self.hidden_dim, bias=False)
+                for _ in range(self.num_experts)
+            ]
+        )
+        self.use_context_proj = use_context_proj
+        if self.use_context_proj:
+            self.context_down_projections = nn.ModuleList(
+                [
+                    nn.Linear(self.intermediate_dim, self.hidden_dim, bias=False)
+                    for _ in range(self.num_experts)
+                ]
+            )
         # self.gate_up_proj = nn.Linear(self.hidden_dim, 2 * self.intermediate_dim, bias=False)
         # self.gate_up_proj = nn.Parameter(torch.empty(self.num_experts, 2 * self.intermediate_dim, self.hidden_dim))
 
@@ -298,6 +345,9 @@ class DeepseekV3NaiveMoe(nn.Module):
         top_k_weights: torch.Tensor,
     ) -> torch.Tensor:
         final_hidden_states = torch.zeros_like(hidden_states)
+        final_context_states = None
+        if self.use_context_proj:
+            final_context_states = torch.zeros_like(hidden_states)
         with torch.no_grad():
             expert_mask = torch.nn.functional.one_hot(top_k_index, num_classes=self.num_experts)
             expert_mask = expert_mask.permute(2, 1, 0)
@@ -310,26 +360,42 @@ class DeepseekV3NaiveMoe(nn.Module):
             top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
             current_state = hidden_states[token_idx]
             gate, up = self.gate_up_projections[expert_idx](current_state).chunk(2, dim=-1)
-            current_hidden_states = self.act_fn(gate) * up
-            current_hidden_states = self.down_projections[expert_idx](current_hidden_states)
-            current_hidden_states = current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
-            final_hidden_states.index_add_(0, token_idx, current_hidden_states.to(final_hidden_states.dtype))
+            current_inter_states = self.act_fn(gate) * up
+            current_topk_weights = top_k_weights[token_idx, top_k_pos, None]
+            current_hidden_states = self.down_projections[expert_idx](current_inter_states)
+            current_hidden_states = current_hidden_states * current_topk_weights
+            final_hidden_states.index_add_(
+                0, token_idx, current_hidden_states.to(final_hidden_states.dtype)
+            )
 
-        return final_hidden_states
+            current_context_states = current_hidden_states
+            if self.use_context_proj:
+                current_context_states = self.context_down_projections[expert_idx](
+                    current_inter_states
+                )
+                current_context_states = current_context_states * current_topk_weights
+                final_context_states.index_add_(
+                    0, token_idx, current_context_states.to(final_context_states.dtype)
+                )
+
+        if not self.use_context_proj:
+            final_context_states = final_hidden_states
+        return final_hidden_states, final_context_states
 
 
 class DeepseekV3MoE(nn.Module):
-    """
-    A mixed expert module containing shared experts.
-    """
+    """A mixed expert module containing shared experts."""
 
-    def __init__(self, config):
+    def __init__(self, config, use_context_proj: bool):
         super().__init__()
         self.config = config
-        self.experts = DeepseekV3NaiveMoe(config)
+        self.experts = DeepseekV3NaiveMoe(config, use_context_proj=use_context_proj)
         self.gate = DeepseekV3TopkRouter(config)
         self.shared_experts = DeepseekV3MLP(
-            config=config, intermediate_size=DS_CONFIG_FOR_NEMOTRON["moe_shared_expert_intermediate_size"] * DS_CONFIG_FOR_NEMOTRON["n_shared_experts"]
+            config=config,
+            intermediate_size=DS_CONFIG_FOR_NEMOTRON["moe_shared_expert_intermediate_size"]
+            * DS_CONFIG_FOR_NEMOTRON["n_shared_experts"],
+            use_context_proj=use_context_proj,
         )
         self.n_routed_experts = DS_CONFIG_FOR_NEMOTRON["n_routed_experts"]
         self.n_group = DS_CONFIG_FOR_NEMOTRON["n_group"]
@@ -341,9 +407,13 @@ class DeepseekV3MoE(nn.Module):
     def route_tokens_to_experts(self, router_logits):
         with torch.autocast(device_type="cuda", enabled=False):
             router_logits = router_logits.to(torch.float32).sigmoid()
-            router_logits_for_choice = router_logits.to(torch.float32) + self.gate.get_e_score_correction_bias().to(torch.float32)
+            router_logits_for_choice = router_logits.to(
+                torch.float32
+            ) + self.gate.get_e_score_correction_bias().to(torch.float32)
             group_scores = (
-                router_logits_for_choice.view(-1, self.n_group, self.n_routed_experts // self.n_group)
+                router_logits_for_choice.view(
+                    -1, self.n_group, self.n_routed_experts // self.n_group
+                )
                 .topk(2, dim=-1)[0]
                 .sum(dim=-1)
             )
@@ -365,14 +435,11 @@ class DeepseekV3MoE(nn.Module):
                 with torch.no_grad():
                     chosen_experts = topk_indices.flatten()
                     # Count how many times each expert was selected
-                    expert_usage = torch.bincount(
-                        chosen_experts, 
-                        minlength=self.n_routed_experts
-                    )
+                    expert_usage = torch.bincount(chosen_experts, minlength=self.n_routed_experts)
 
                 if torch.distributed.is_initialized():
                     torch.distributed.all_reduce(expert_usage, op=torch.distributed.ReduceOp.SUM)
-                
+
                 self.gate.e_score_correction_bias_temp_acc.data += expert_usage.to(torch.int64)
             if self.norm_topk_prob:
                 denominator = topk_weights.sum(dim=-1, keepdim=True) + 1e-20
@@ -386,35 +453,182 @@ class DeepseekV3MoE(nn.Module):
         router_logits = self.gate(hidden_states)
         topk_indices, topk_weights, aux_loss = self.route_tokens_to_experts(router_logits)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        hidden_states = self.experts(hidden_states, topk_indices, topk_weights).view(*orig_shape)
-        hidden_states = hidden_states + self.shared_experts(residuals)
-        return hidden_states, hidden_states, aux_loss
+        hidden_states, context_states = self.experts(hidden_states, topk_indices, topk_weights)
+        add_hidden_states, add_context_states = self.shared_experts(residuals)
+        hidden_states = hidden_states.view(*orig_shape) + add_hidden_states
+        context_states = context_states.view(*orig_shape) + add_context_states
+        return hidden_states, context_states, aux_loss
 
-class LlamaDecoderLayer(GradientCheckpointingLayer):
+
+def apply_rotary_pos_emb_safe(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+    q_len = q.size(-2)
+    q_embed = (q * cos[..., -q_len:, :]) + (rotate_half(q) * sin[..., -q_len:, :])
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
+
+
+class LlamaDFlashAttention(nn.Module):
+    """Multi-headed attention from 'Attention Is All You Need' paper"""
+
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        self.head_dim = getattr(
+            config, "head_dim", config.hidden_size // config.num_attention_heads
+        )
+        self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
+        self.scaling = self.head_dim**-0.5
+        self.attention_dropout = config.attention_dropout
+        self.is_causal = False
+
+        self.q_proj = nn.Linear(
+            config.hidden_size,
+            config.num_attention_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.k_proj = nn.Linear(
+            config.hidden_size,
+            config.num_key_value_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.v_proj = nn.Linear(
+            config.hidden_size,
+            config.num_key_value_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.o_proj = nn.Linear(
+            config.num_attention_heads * self.head_dim,
+            config.hidden_size,
+            bias=config.attention_bias,
+        )
+        self.q_norm = LlamaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = LlamaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        context_states: torch.Tensor,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        attention_mask: torch.Tensor | None,
+        past_key_values: Cache | None = None,
+        cache_position: torch.LongTensor | None = None,
+        **kwargs: Unpack[TransformersKwargs],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert context_states is not None, "DFlashAttention requires context_states"
+        assert attention_mask is not None, "DFlashAttention requires attention_mask"
+        assert past_key_values is None, "DFlashAttention does not support past_key_values"
+        assert cache_position is None, "DFlashAttention does not support cache_position"
+        bsz, q_len = hidden_states.shape[:-1]
+        ctx_len = context_states.shape[1]
+
+        q = self.q_proj(hidden_states).view(bsz, q_len, -1, self.head_dim)
+        q = self.q_norm(q).transpose(1, 2)
+
+        k_ctx = self.k_proj(context_states)
+        k_noise = self.k_proj(hidden_states)
+        v_ctx = self.v_proj(context_states)
+        v_noise = self.v_proj(hidden_states)
+        k = torch.cat([k_ctx, k_noise], dim=1).view(bsz, ctx_len + q_len, -1, self.head_dim)
+        v = torch.cat([v_ctx, v_noise], dim=1).view(bsz, ctx_len + q_len, -1, self.head_dim)
+        k = self.k_norm(k).transpose(1, 2)
+        v = v.transpose(1, 2)
+        cos, sin = position_embeddings
+        q, k = apply_rotary_pos_emb_safe(q, k, cos, sin)
+        if self.config._attn_implementation != "eager":
+            attn_fn = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+        else:
+            raise NotImplementedError(
+                "DFlashAttention only supports non-eager attention implementations."
+            )
+        if "is_causal" not in kwargs:
+            kwargs["is_causal"] = self.is_causal
+        assert kwargs["is_causal"] == False, "DFlashAttention only supports non-causal attention."
+        attn_output, attn_weights = attn_fn(
+            self,
+            q,
+            k,
+            v,
+            attention_mask,
+            dropout=0.0 if not self.training else self.attention_dropout,
+            scaling=self.scaling,
+            **kwargs,
+        )
+        attn_output = attn_output.reshape(bsz, q_len, -1).contiguous()
+        attn_output = self.o_proj(attn_output)
+        return attn_output, attn_weights
+
+        # input_shape = hidden_states.shape[:-1]
+        # hidden_shape = (*input_shape, -1, self.head_dim)
+
+        # query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+        # key_states = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+        # value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+
+        # cos, sin = position_embeddings
+        # query_states, key_states = apply_rotary_pos_emb_safe(query_states, key_states, cos, sin)
+
+        # if past_key_values is not None:
+        #     # sin and cos are specific to RoPE models; cache_position needed for the static cache
+        #     cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+        #     key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx, cache_kwargs)
+
+        # attention_interface: Callable = eager_attention_forward
+        # if self.config._attn_implementation != "eager":
+        #     attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+
+        # attn_output, attn_weights = attention_interface(
+        #     self,
+        #     query_states,
+        #     key_states,
+        #     value_states,
+        #     attention_mask,
+        #     dropout=0.0 if not self.training else self.attention_dropout,
+        #     scaling=self.scaling,
+        #     **kwargs,
+        # )
+
+        # attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+        # attn_output = self.o_proj(attn_output)
+        # return attn_output, attn_weights
+
+
+class LlamaDecoderLayer(GradientCheckpointingLayer):
+    def __init__(self, config: LlamaConfig, layer_idx: int, mode: str):
+        super().__init__()
         self.hidden_size = config.hidden_size
+        self.mode = mode
 
-        self.self_attn = LlamaAttention(config=config, layer_idx=layer_idx)
+        if self.mode == "dflash":
+            self.self_attn = LlamaDFlashAttention(config=config, layer_idx=layer_idx)
+        else:
+            self.self_attn = LlamaAttention(config=config, layer_idx=layer_idx)
 
-        # self.mlp = LlamaMLP(config)
-        self.mlp = DeepseekV3MoE(config)
+        self.mlp = LlamaMLP(config, use_context_proj=False)
+        # self.mlp = DeepseekV3MoE(config, use_context_proj=True)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
-        use_cache: Optional[bool] = False,
-        cache_position: Optional[torch.LongTensor] = None,
-        position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
+        context_states: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: Cache | None = None,
+        use_cache: bool | None = False,
+        cache_position: torch.LongTensor | None = None,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor]
+        | None = None,  # necessary, but kept here for BC
         **kwargs: Unpack[TransformersKwargs],
     ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
+        if self.mode == "dflash":
+            kwargs.update({"context_states": context_states})
+
         # Self Attention
         hidden_states, _ = self.self_attn(
             hidden_states=hidden_states,
@@ -432,23 +646,29 @@ class LlamaDecoderLayer(GradientCheckpointingLayer):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         mlp_output = self.mlp(hidden_states)
-        assert isinstance(mlp_output, tuple), \
+        assert isinstance(mlp_output, tuple), (
             f"MLP output should be a tuple, got {type(mlp_output)}"
+        )
         hidden_states, context_out_h, aux_loss = mlp_output
         hidden_states = residual + hidden_states
-        context_out_h = residual + context_out_h
+        context_out_h = (residual + context_out_h) if context_out_h is not None else None
         return hidden_states, context_out_h, aux_loss
+
 
 class EagleModule(nn.Module):
     """Eagle module used in EAGLE model."""
 
-    def __init__(self, config, decoder_layer_cls, bias=False):
+    def __init__(self, config, decoder_layer_cls, mode: str, bias=False):
         """Init function for EagleModule."""
         super().__init__()
         self.config = config
+        self.mode = mode
 
         self.layers = nn.ModuleList(
-            [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [
+                LlamaDecoderLayer(config, layer_idx, mode=mode)
+                for layer_idx in range(config.num_hidden_layers)
+            ]
         )
         if config.use_last_layernorm:
             self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
@@ -481,8 +701,9 @@ class EagleModule(nn.Module):
                 config.hidden_size,
                 bias=bias,
             )
-        
-        if True:
+
+        if self.mode != "dflash":
+            print("Using EAGLE3 mode")
             first_layer_attn = self.layers[0].self_attn
             if not isinstance(first_layer_attn, LlamaAttention):
                 raise ValueError("EAGLE-3 only support LlamaAttention.")
@@ -509,12 +730,14 @@ class EagleModule(nn.Module):
                 bias=first_layer_attn.config.attention_bias,
             )
 
-            # In EAGLE-3, input_embeds and hidden_states are normalized separately before concatenation.
-            self.input_embeds_norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-            self.hidden_norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-
             # Disable input norm in first layer. We normed embeds and h individually before.
             self.layers[0].input_layernorm = nn.Identity()
+        else:
+            print("EAGLE module using DFlash mode")
+
+        # In EAGLE-3, input_embeds and hidden_states are normalized separately before concatenation.
+        self.input_embeds_norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.hidden_norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def _eagle3_attention_forward_pre_hook(self, module, args, kwargs):
         """Concat input_embeds and hidden_states for EAGLE-3's first attention layer."""
@@ -545,6 +768,7 @@ class EagleModule(nn.Module):
         position_embeddings: torch.Tensor | None = None,
     ):
         """Forward function for EagleModule."""
+        # batch_size, seq_length = inputs_embeds.shape[:2]
         batch_size, seq_length, _ = hidden_states.shape
         seq_length_with_past = seq_length
         past_key_values_length = 0
@@ -553,6 +777,7 @@ class EagleModule(nn.Module):
             past_key_values_length = past_key_values.get_seq_length()
             seq_length_with_past = seq_length_with_past + past_key_values_length
         if position_ids is None:
+            raise NotImplementedError("EAGLE module requires position_ids to be passed in.")
             device = hidden_states.device if hidden_states is not None else inputs_embeds.device
             position_ids = torch.arange(
                 past_key_values_length,
@@ -562,18 +787,38 @@ class EagleModule(nn.Module):
             )
             position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
         else:
-            position_ids = position_ids.view(-1, seq_length).long()
+            position_ids = position_ids.long()
+            # position_ids = position_ids.view(-1, seq_length).long()
 
         inputs_embeds = inputs_embeds.to(hidden_states.dtype).to(hidden_states.device)
-        if self.config.use_aux_hidden_state or not hasattr(self, "fc"):
-            # In EAGLE-3, we save input embeddings to attribute, and use it in first decoder layer by hook function
-            # Also, we normalize input embeddings and hidden states before concatenating them.
-            # The default input norm in first layer attn will be disabled.
-            self._input_embeds = self.input_embeds_norm(inputs_embeds)
+        if self.mode != "dflash":
+            if self.config.use_aux_hidden_state or not hasattr(self, "fc"):
+                # In EAGLE-3, we save input embeddings to attribute, and use it in first decoder layer by hook function
+                # Also, we normalize input embeddings and hidden states before concatenating them.
+                # The default input norm in first layer attn will be disabled.
+                self._input_embeds = self.input_embeds_norm(inputs_embeds)
+            else:
+                # EAGLE-1
+                hidden_states = self.fc(torch.cat((inputs_embeds, hidden_states), dim=-1))
         else:
-            # EAGLE-1
-            hidden_states = self.fc(torch.cat((inputs_embeds, hidden_states), dim=-1))
+            target_hidden_states = self.hidden_norm(hidden_states)
+            inputs_embeds = self.input_embeds_norm(inputs_embeds)
+            hidden_states = inputs_embeds
 
+            for decoder_layer in self.layers:
+                hidden_states, _, _ = decoder_layer(
+                    hidden_states=hidden_states,
+                    context_states=target_hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_values,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                    position_embeddings=position_embeddings,
+                )
+            pre_norm_h = hidden_states
+            post_norm_h = self.norm(hidden_states) if hasattr(self, "norm") else hidden_states
+            return post_norm_h, pre_norm_h, past_key_values, None
 
         aux_loss_acc = None
         for decoder_layer in self.layers:
@@ -592,7 +837,7 @@ class EagleModule(nn.Module):
                 else:
                     aux_loss_acc = aux_loss_acc + aux_loss
 
-        pre_norm_h = context_out_h
+        pre_norm_h = context_out_h if context_out_h is not None else hidden_states
 
         post_norm_h = self.norm(hidden_states) if hasattr(self, "norm") else hidden_states
         return post_norm_h, pre_norm_h, past_key_values, aux_loss_acc
@@ -746,9 +991,14 @@ class HFEagleModel(EagleModel):
                 f"{self._base_llm_config.hidden_size}!"
             )
 
+        self.num_spec_tokens = 5  # NOTE: (hg) hardcoded for now. Should add to cfg.
+        self.eval_num_spec_tokens = 7
+        self.draft_mode: Literal["ar", "pard", "dflash"] = "dflash"
+
         self.eagle_module = EagleModule(
             self.eagle_config,
             decoder_cls,
+            mode=self.draft_mode,
         )
         self.eagle_rotary_emb = LlamaRotaryEmbedding(config=self.eagle_config)
 
@@ -777,8 +1027,48 @@ class HFEagleModel(EagleModel):
         # https://github.com/huggingface/transformers/blob/v4.56-release/src/transformers/trainer.py#L566
         self.is_quantized = False
 
-        self.num_ttt_steps = 7  # NOTE: (hg) hardcoded for now. Should add to cfg.
+        if self.draft_mode in ["pard", "dflash"]:
+            # register mask input embedding vector as a learnable parameter
+            self.mask_input_embedding = nn.Parameter(
+                torch.zeros(self.eagle_config.hidden_size), requires_grad=True
+            )
+            self.mask_target_hidden_state = nn.Parameter(
+                torch.zeros(self.eagle_config.hidden_size), requires_grad=True
+            )
+        else:
+            self.mask_input_embedding = None
+            self.mask_target_hidden_state = None
         self._cached_attn_blk_masks = {}
+        self._cached_full_seq_masks = {}
+        self._cached_dflash_masks = {}
+
+        self.max_seq_len = 4096
+
+    def _get_dflash_attention_mask(self, seq_length, num_spec_tokens):
+        cache_key = (seq_length, num_spec_tokens)
+        if cache_key not in self._cached_dflash_masks and (
+            len(self._cached_dflash_masks) < 8 or seq_length == self.max_seq_len
+        ):
+            self._cached_dflash_masks.update(
+                {cache_key: self._compute_dflash_attention_mask(seq_length, num_spec_tokens)}
+            )
+        elif cache_key not in self._cached_dflash_masks:
+            print("Computing dflash attention mask without caching.")
+            return self._compute_dflash_attention_mask(seq_length, num_spec_tokens)
+        return self._cached_dflash_masks[cache_key]
+
+    def _get_full_sequence_ttt_attention_mask(self, seq_length, num_tokens):
+        cache_key = (seq_length, num_tokens)
+        if cache_key not in self._cached_full_seq_masks and (
+            len(self._cached_full_seq_masks) < 8 or seq_length == self.max_seq_len
+        ):
+            self._cached_full_seq_masks.update(
+                {cache_key: self._compute_full_ttt_attention_mask(seq_length, num_tokens)}
+            )
+        elif cache_key not in self._cached_full_seq_masks:
+            print("Computing full sequence ttt attention mask without caching.")
+            return self._compute_full_ttt_attention_mask(seq_length, num_tokens)
+        return self._cached_full_seq_masks[cache_key]
 
     def _get_ttt_attention_mask(self, seq_length, ttt_step):
         # compile and cached flex attention masks in first call
@@ -864,6 +1154,77 @@ class HFEagleModel(EagleModel):
             position_ids = position_ids.view(-1, seq_length).long()
 
         return eagle_input_ids, attention_mask, position_ids
+
+    def _compute_dflash_attention_mask(self, seq_length, num_spec_tokens):
+        """Return dflash attention_mask for a sequence."""
+
+        def msk_func(b, h, q_idx, kv_idx):
+            kv_local_index = kv_idx % seq_length
+            kv_block_index = kv_idx // seq_length
+            q_local_index = q_idx % seq_length
+
+            is_context_mode = kv_block_index == 0
+            context_attn_mask = is_context_mode & (kv_local_index <= q_local_index)
+            is_not_context_mode = kv_block_index > 0
+            non_context_attn_mask = is_not_context_mode & (kv_local_index == q_local_index)
+            return context_attn_mask | non_context_attn_mask
+
+        dtypemin = torch.finfo(self._base_llm_config.dtype).min
+        q_len = seq_length * (1 + num_spec_tokens)  # sampled tokens + one mask for each spec token
+        kv_len = seq_length * (
+            2 + num_spec_tokens
+        )  # context + sampled tokens + one mask for each spec token
+        if self.eagle_module.config._attn_implementation == "flex_attention":
+            # Return block mask for flex attention
+            block_mask = create_block_mask(msk_func, B=None, H=None, Q_LEN=q_len, KV_LEN=kv_len)
+            return block_mask
+        else:
+            # Return tensor mask for non-flex attention
+            tensor_mask = msk_func(
+                None,
+                None,
+                torch.arange(q_len).view(1, 1, q_len, 1),
+                torch.arange(kv_len).view(1, 1, 1, kv_len),
+            ).to(self.device)
+            tensor_mask = torch.full_like(
+                tensor_mask, 0, dtype=self._base_llm_config.dtype, device=self.device
+            ).masked_fill(~tensor_mask, dtypemin)
+            return tensor_mask
+
+    def _compute_full_ttt_attention_mask(self, seq_length, num_tokens) -> torch.Tensor:
+        """Return full TTT attention_mask for a concatenated sequence (no KV cache).
+        q_len == kv_len == num_tokens * seq_length.
+        """
+        total_len = num_tokens * seq_length
+
+        def msk_func(b, h, q_idx, kv_idx):
+            S = q_idx // seq_length
+            mask = kv_idx <= (q_idx - S * (seq_length + 1))
+
+            for j in range(num_tokens):
+                on_diagonal = kv_idx == (q_idx - j * (seq_length + 1))
+                valid_chunk = kv_idx >= (S - j) * seq_length
+                valid_step = j < S
+
+                mask = mask | (on_diagonal & valid_chunk & valid_step)
+
+            return mask
+
+        dtypemin = torch.finfo(self._base_llm_config.dtype).min
+
+        if self.eagle_module.config._attn_implementation == "flex_attention":
+            return create_block_mask(msk_func, B=None, H=None, Q_LEN=total_len, KV_LEN=total_len)
+        else:
+            tensor_mask = msk_func(
+                None,
+                None,
+                torch.arange(total_len).view(1, 1, total_len, 1),
+                torch.arange(total_len).view(1, 1, 1, total_len),
+            ).to(self.device)
+
+            return torch.full_like(
+                tensor_mask, 0, dtype=self._base_llm_config.dtype, device=self.device
+            ).masked_fill(~tensor_mask, dtypemin)
 
     def _compute_ttt_attention_mask(self, seq_length, ttt_step) -> BlockMask | torch.Tensor:
         """Return TTT attention_mask tensor of type BlockMask or Tensor depends on eagle attn impl."""
@@ -989,7 +1350,7 @@ class HFEagleModel(EagleModel):
             inputs_embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            use_cache=True,
+            use_cache=eagle_cache is not None,
             position_embeddings=position_embeddings,
             past_key_values=eagle_cache,
         )
@@ -1089,12 +1450,12 @@ class HFEagleModel(EagleModel):
                 # Add some noise to the input hidden states
                 noise = (
                     (torch.rand_like(eagle_input_hidden_states) - 0.5)
-                    * 0.2 # Magic number: noise scale used in EAGLE paper
+                    * 0.2  # Magic number: noise scale used in EAGLE paper
                     * 512
                     / eagle_input_hidden_states.shape[-1]
                 )
                 eagle_input_hidden_states = eagle_input_hidden_states + noise
-        
+
         if self.eagle_config.use_aux_hidden_state:
             eagle_input_hidden_states = self.eagle_module.fc(eagle_input_hidden_states)
 
@@ -1109,55 +1470,158 @@ class HFEagleModel(EagleModel):
         with torch.no_grad():
             inputs_embeds = self._llm_or_vlm_embedding(eagle_input_ids, kwargs)
 
-        position_embeddings = self.eagle_rotary_emb(eagle_input_hidden_states, position_ids)
         past_key_values.eagle_cache = eagle_cache
 
-        # ====Perform training-time-testing with 3 extra eagle forward passes====
-        for ttt_step in range(self.num_ttt_steps):
-            attention_mask = (
-                attention_mask_0
-                if ttt_step == 0
-                else self._get_ttt_attention_mask(seq_length, ttt_step)
-            )
-            _, eagle_input_hidden_states, eagle_logits, eagle_cache, aux_loss = self._eagle_forward(
-                eagle_input_hidden_states,
-                inputs_embeds,
-                attention_mask,
-                position_ids,
-                position_embeddings,
-                eagle_cache,
-            )
-            eagle_input_hidden_states = torch.cat(
-                (
-                    torch.zeros(
-                        (b, 1, h),
-                        dtype=eagle_input_hidden_states.dtype,
-                        device=eagle_input_hidden_states.device,
-                    ),
-                    eagle_input_hidden_states[:, :-1, :],
-                ),
+        if self.draft_mode == "dflash":
+            num_spec_tokens = self.num_spec_tokens if self.training else self.eval_num_spec_tokens
+            eagle_inputs_embeds = torch.cat(
+                [inputs_embeds]
+                + [self.mask_input_embedding.unsqueeze(0).unsqueeze(0).expand(b, seq_length, -1)]
+                * num_spec_tokens,
                 dim=1,
             )
-            classification_loss, acc = self._eagle_loss(
-                # base model predict +1 tok, while eagle predict +2
-                # so we shift base model outputs compared to eagle outputs
-                base_model_logits[:, 1:],
-                eagle_logits[:, :-1],
-                # additionally, we mask the first n tok of eagle outputs at nth TTT step
-                torch.cat(
-                    (
-                        torch.zeros(b, ttt_step, dtype=loss_mask.dtype, device=loss_mask.device),
-                        loss_mask[:, 1 + ttt_step :],
-                    ),
-                    dim=1,
-                ),
+            attention_mask = self._get_dflash_attention_mask(seq_length, num_spec_tokens)
+            position_ids = torch.cat([position_ids + j for j in range(num_spec_tokens + 2)], dim=1)
+            position_embeddings = self.eagle_rotary_emb(eagle_input_hidden_states, position_ids)
+            _, eagle_output_hidden_states, eagle_logits, eagle_cache, aux_loss = (
+                self._eagle_forward(
+                    eagle_input_hidden_states,
+                    eagle_inputs_embeds,
+                    attention_mask,
+                    position_ids,
+                    position_embeddings,
+                    None,  # No KV cache needed, we are doing it all in a single forward pass
+                )
             )
-            # is_in_last_2_steps = ttt_step >= (self.num_ttt_steps - 2)
-            # if is_in_last_2_steps:
-            eagle_losses.append(classification_loss)
-            train_accs.append(acc)
+            # Now we loop over the TTT steps to accumulate the losses as normal
+            prev_acc = 1.0
+            for ttt_step in range(num_spec_tokens):
+                classification_loss, acc = self._eagle_loss(
+                    # base model predict +1 tok, while eagle predict +2
+                    # so we shift base model outputs compared to eagle outputs
+                    base_model_logits[:, 1 + ttt_step :],
+                    eagle_logits[:, (ttt_step + 1) * seq_length : (ttt_step + 2) * seq_length][
+                        :, : -1 - ttt_step
+                    ],
+                    # additionally, we mask the first n tok of eagle outputs at nth TTT step
+                    loss_mask[:, 1 + ttt_step :],
+                )
+                eagle_losses.append(classification_loss)
+                eps = 1e-5
+                train_accs.append(acc / prev_acc if prev_acc > eps else (1.0 if acc > eps else 0.0))
+                prev_acc = acc
             if aux_loss is not None:
                 aux_losses.append(aux_loss)
+        elif self.draft_mode == "pard":
+            # ====Perform parallel eagle forward passes with TTT attention mask====
+            num_spec_tokens = self.num_spec_tokens if self.training else self.eval_num_spec_tokens
+            attention_mask = self._get_full_sequence_ttt_attention_mask(seq_length, num_spec_tokens)
+            position_ids = torch.cat([position_ids] * num_spec_tokens, dim=1)
+            position_embeddings = self.eagle_rotary_emb(eagle_input_hidden_states, position_ids)
+            eagle_inputs_embeds = torch.cat(
+                [inputs_embeds]
+                + [self.mask_input_embedding.unsqueeze(0).unsqueeze(0).expand(b, seq_length, -1)]
+                * (num_spec_tokens - 1),
+                dim=1,
+            )
+            eagle_input_hidden_states = torch.cat(
+                [eagle_input_hidden_states]
+                + [
+                    self.mask_target_hidden_state.unsqueeze(0)
+                    .unsqueeze(0)
+                    .expand(b, seq_length, -1)
+                ]
+                * (num_spec_tokens - 1),
+                dim=1,
+            )
+            _, eagle_output_hidden_states, eagle_logits, eagle_cache, aux_loss = (
+                self._eagle_forward(
+                    eagle_input_hidden_states,
+                    eagle_inputs_embeds,
+                    attention_mask,
+                    position_ids,
+                    position_embeddings,
+                    None,  # No KV cache needed, we are doing it all in a single forward pass
+                )
+            )
+
+            # Now we loop over the TTT steps to accumulate the losses as normal
+            # TODO(ben): is this correct, or is this miscalculated?
+            for ttt_step in range(num_spec_tokens):
+                classification_loss, acc = self._eagle_loss(
+                    # base model predict +1 tok, while eagle predict +2
+                    # so we shift base model outputs compared to eagle outputs
+                    base_model_logits[:, 1:],
+                    eagle_logits[:, ttt_step * seq_length : (ttt_step + 1) * seq_length][:, :-1],
+                    # additionally, we mask the first n tok of eagle outputs at nth TTT step
+                    torch.cat(
+                        (
+                            torch.zeros(
+                                b, ttt_step, dtype=loss_mask.dtype, device=loss_mask.device
+                            ),
+                            loss_mask[:, 1 + ttt_step :],
+                        ),
+                        dim=1,
+                    ),
+                )
+                eagle_losses.append(classification_loss)
+                train_accs.append(acc)
+            if aux_loss is not None:
+                aux_losses.append(aux_loss)
+        elif self.draft_mode == "ar":
+            # ====Perform training-time-testing eagle forward passes====
+            position_embeddings = self.eagle_rotary_emb(eagle_input_hidden_states, position_ids)
+            num_spec_tokens = self.num_spec_tokens if self.training else self.eval_num_spec_tokens
+            for ttt_step in range(num_spec_tokens):
+                attention_mask = (
+                    attention_mask_0
+                    if ttt_step == 0
+                    else self._get_ttt_attention_mask(seq_length, ttt_step)
+                )
+                _, eagle_output_hidden_states, eagle_logits, eagle_cache, aux_loss = (
+                    self._eagle_forward(
+                        eagle_input_hidden_states,
+                        inputs_embeds,
+                        attention_mask,
+                        position_ids,
+                        position_embeddings,
+                        eagle_cache,
+                    )
+                )
+                eagle_input_hidden_states = torch.cat(
+                    (
+                        torch.zeros(
+                            (b, 1, h),
+                            dtype=eagle_output_hidden_states.dtype,
+                            device=eagle_output_hidden_states.device,
+                        ),
+                        eagle_output_hidden_states[:, :-1, :],
+                    ),
+                    dim=1,
+                )
+                classification_loss, acc = self._eagle_loss(
+                    # base model predict +1 tok, while eagle predict +2
+                    # so we shift base model outputs compared to eagle outputs
+                    base_model_logits[:, 1:],
+                    eagle_logits[:, :-1],
+                    # additionally, we mask the first n tok of eagle outputs at nth TTT step
+                    torch.cat(
+                        (
+                            torch.zeros(
+                                b, ttt_step, dtype=loss_mask.dtype, device=loss_mask.device
+                            ),
+                            loss_mask[:, 1 + ttt_step :],
+                        ),
+                        dim=1,
+                    ),
+                )
+                eagle_losses.append(classification_loss)
+                train_accs.append(acc)
+                if aux_loss is not None:
+                    aux_losses.append(aux_loss)
+        else:
+            raise ValueError(f"Draft mode {self.draft_mode} not supported.")
+
         eagle_loss = torch.stack(eagle_losses).mean()
         aux_loss = torch.mean(torch.stack(aux_losses)) if len(aux_losses) > 0 else None
         # Finally, we merge base model loss and eagle loss, raise error if both are None
@@ -1203,7 +1667,7 @@ class HFEagleModel(EagleModel):
         valid = loss_mask[:, :, 0].bool()
         correct = (base_predict_tok == eagle_predict_tok) & valid
         denom = valid.sum().clamp_min(1).float()
-        accuracy = round(correct.sum().float().div(denom).item(), 3)
+        accuracy = correct.sum().float().div(denom).item()
 
         return classification_loss, accuracy
 
