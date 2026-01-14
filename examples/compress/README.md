@@ -11,6 +11,8 @@ To use the Puzzle algorithm effectively, we need to specify the target number of
 
 In this example, we compress the [Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) model reducing GPU memory usage from 113 GiB to 96 GiB (15% reduction) with less than 1% regression in the token_accuracy_top_10 metric.
 
+> **Note:** Other models are also supported. See the [configs](./configs/) directory for additional model configurations (e.g., Llama-3.2-3B-Instruct). For information on adding support for new models, see the [AnyModel Guide](../../modelopt/torch/_compress/anymodel/README.md).
+
 ## Environment
 
 - Install Model-Optimizer in editable mode with the corresponding dependencies:
