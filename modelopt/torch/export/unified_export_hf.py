@@ -121,15 +121,15 @@ def _collect_shared_input_modules(
     output_to_layernorm: dict | None = defaultdict(lambda: None) if collect_layernorms else None
 
     def _input_hook(module, input, output):
-        """Collect modules that share the same input tensor."""
+        """Update dictionary with list of all modules that share the same input."""
         if len(input) > 0 and isinstance(input[0], torch.Tensor):
-            # Use tensor data pointer as key to identify same tensor
-            input_to_linear[input[0].data_ptr()].append(module)
+            # TODO: Handle DBRX MoE case
+            input_to_linear[input[0]].append(module)
 
     def _output_hook(module, input, output):
-        """Collect layernorm output mappings."""
+        """Update dictionary with mapping of layernorms and their outputs."""
         if output_to_layernorm is not None and isinstance(output, torch.Tensor):
-            output_to_layernorm[output.data_ptr()] = module
+            output_to_layernorm[output] = module
 
     handles = []
 
@@ -189,10 +189,11 @@ def _fuse_shared_input_modules(
     fused_count = 0
 
     for tensor, modules in input_to_linear.items():
-        if quantization_format is None and modules:
-            quantization_format = get_quantization_format(modules[0])
+        # Get quantization format for this group of modules
+        # (must be re-evaluated per group as different modules may have different formats)
+        group_quant_format = get_quantization_format(modules[0]) if modules else quantization_format
 
-        if len(modules) > 1 and quantization_format not in [
+        if len(modules) > 1 and group_quant_format not in [
             QUANTIZATION_FP8,
             QUANTIZATION_NONE,
             QUANTIZATION_FP8_PB_REAL,
@@ -226,9 +227,9 @@ def _fuse_shared_input_modules(
             if (
                 fuse_layernorms
                 and output_to_layernorm is not None
-                and quantization_format is not None
-                and quantization_format != QUANTIZATION_NONE
-                and "awq" in quantization_format
+                and group_quant_format is not None
+                and group_quant_format != QUANTIZATION_NONE
+                and "awq" in group_quant_format
                 and tensor in output_to_layernorm
             ):
                 with fsdp2_aware_weight_update(model, output_to_layernorm[tensor]):
