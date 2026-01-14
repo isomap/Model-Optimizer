@@ -570,6 +570,8 @@ class EagleTrainingPlot(TrainerCallback):
         if not hasattr(state, "training_accs") or len(state.training_accs) == 0:
             return
         average_acc = np.mean(state.training_accs, axis=0)
+        mode_name = "Eval" if eval_mode else "Training"
+        mode_id = mode_name.lower()
         if self.estimate_ar:
             # Calculate mean training AR since last log
             # NOTE: This is only a estimate of the real AR.
@@ -578,20 +580,20 @@ class EagleTrainingPlot(TrainerCallback):
             for step_acc in average_acc:
                 est_ar += acc_cumprod * step_acc
                 acc_cumprod *= step_acc
-            print_rank_0(f"Step {state.global_step} Estimated {"Eval" if eval_mode else "Training"} AR: {est_ar:.4f}")
+            print_rank_0(f"Step {state.global_step} Estimated {mode_name} AR: {est_ar:.4f}")
 
         # log to wandb
         if wandb and is_master():
             for i, step_acc in enumerate(average_acc):
-                wandb.log({f"step_{i}_{"eval" if eval_mode else "train"}_acc": step_acc}, step=state.global_step)
+                wandb.log({f"step_{i}_{mode_id}_acc": step_acc}, step=state.global_step)
             if self.estimate_ar:
-                wandb.log({f"estimated_{"eval" if eval_mode else "train"}_ar": est_ar}, step=state.global_step)
+                wandb.log({f"estimated_{mode_id}_ar": est_ar}, step=state.global_step)
         
         if self.tb_writer:
             for i, step_acc in enumerate(average_acc):
-                self.tb_writer.add_scalar(f"custom/step_{i}_{'eval' if eval_mode else 'train'}_acc", step_acc, state.global_step)
+                self.tb_writer.add_scalar(f"{mode_id}/step_{i}_acc", step_acc, state.global_step)
             if self.estimate_ar:
-                self.tb_writer.add_scalar(f"custom/estimated_{'eval' if eval_mode else 'train'}_ar", est_ar, state.global_step)
+                self.tb_writer.add_scalar(f"{mode_id}/estimated_ar", est_ar, state.global_step)
 
     def on_log(self, args, state, control, **kwargs):
         """Log training acc and estimate AR during log step."""
