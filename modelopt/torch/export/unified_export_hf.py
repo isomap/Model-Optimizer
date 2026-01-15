@@ -31,6 +31,14 @@ import torch
 import torch.nn as nn
 from diffusers import DiffusionPipeline, ModelMixin
 from safetensors.torch import save_file
+
+try:
+    from diffusers import DiffusionPipeline, ModelMixin
+
+    HAS_DIFFUSERS = True
+except ImportError:
+    HAS_DIFFUSERS = False
+
 from torch.distributed.fsdp import FSDPModule
 
 from modelopt.torch.quantization import set_quantizer_by_cfg_context
@@ -771,7 +779,7 @@ def _has_quantized_modules(model: nn.Module) -> bool:
 
 
 def _export_diffusers_checkpoint(
-    pipe: DiffusionPipeline | ModelMixin,
+    pipe: "DiffusionPipeline | ModelMixin",
     dtype: torch.dtype | None,
     export_dir: Path,
     components: list[str] | None,
@@ -940,9 +948,13 @@ def export_hf_checkpoint(
     export_dir = Path(export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    if isinstance(model, (DiffusionPipeline, ModelMixin)):
-        _export_diffusers_checkpoint(model, dtype, export_dir, components)
-        return
+    # Check for diffusers models (only when diffusers is installed)
+    if HAS_DIFFUSERS:
+        from diffusers import DiffusionPipeline, ModelMixin
+
+        if isinstance(model, (DiffusionPipeline, ModelMixin)):
+            _export_diffusers_checkpoint(model, dtype, export_dir, components)
+            return
 
     # Transformers model export
     # NOTE: (hg) Early exit for speculative decoding models
