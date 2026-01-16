@@ -24,6 +24,7 @@ Used by validate_model.py during activation scoring for sharded models.
 # mypy: ignore-errors
 
 import traceback
+from contextlib import nullcontext
 from typing import Type
 
 import numpy as np
@@ -88,6 +89,7 @@ def calculate_losses_pipeline(
     checkpoint_manager=None,
     autocast_dtype: torch.dtype = torch.bfloat16,
     descriptor: Type[ModelDescriptor] = None,
+    use_autocast: bool = True,
 ) -> tuple[dict[str, dict], HiddenStatesAndLMHead | None] | tuple[None, None]:
     """
     Do model forward on each batch and calculate LM loss.
@@ -166,7 +168,12 @@ def calculate_losses_pipeline(
 
     stitched_model.eval()
 
-    with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+    # Use autocast for mixed precision, or nullcontext if disabled
+    # (some models like Qwen3-VL MoE have dtype bugs under autocast)
+    autocast_ctx = (
+        torch.autocast(device_type="cuda", dtype=autocast_dtype) if use_autocast else nullcontext()
+    )
+    with autocast_ctx:
         fake_input_ids = fake_tensor(1, seq_len, dtype=torch.long, device=model_device)
         for i_batch in progress_bar:
             if dist.is_master():

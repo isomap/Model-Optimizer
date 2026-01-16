@@ -197,6 +197,7 @@ def load_and_shard_model(
         world_size=dist.size(),
         is_main_process=dist.is_master(),
         is_last_process=dist.is_last_process(),
+        use_autocast=True,  # Default: use autocast; descriptor can override
     )
 
     with runtime.device:
@@ -273,6 +274,10 @@ def load_and_shard_model(
         descriptor.init_rotary_embedding(model_shard, runtime)
 
         model_shard.type(runtime.dtype)
+
+        # Configure autocast based on model descriptor (some models like Qwen3-VL MoE
+        # have dtype bugs under autocast)
+        runtime.use_autocast = descriptor.uses_autocast()
 
     params_on_meta_device = [
         param_name

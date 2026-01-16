@@ -124,7 +124,9 @@ class ReplacementLibrary:
     def model_config(self) -> DeciLMConfig:
         if self._model_config is None:
             self._model_config = load_model_config(
-                self.get_arbitrary_checkpoint_dir(), self.model_config_overrides
+                self.get_arbitrary_checkpoint_dir(),
+                self.model_config_overrides,
+                ignore_unexpected_config_keys=True,
             )
         return self._model_config
 

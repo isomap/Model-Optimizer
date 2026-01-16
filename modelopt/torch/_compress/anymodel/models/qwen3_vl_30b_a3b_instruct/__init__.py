@@ -13,11 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Import models to trigger factory registration
-from modelopt.torch._compress.anymodel.models.llama import *
-from modelopt.torch._compress.anymodel.models.mistral_small import *
-from modelopt.torch._compress.anymodel.models.nemotron_h import *
-from modelopt.torch._compress.anymodel.models.nemotron_h_v2 import *
-from modelopt.torch._compress.anymodel.models.qwen2 import *
-from modelopt.torch._compress.anymodel.models.qwen3_8b import *
-from modelopt.torch._compress.anymodel.models.qwen3_vl_30b_a3b_instruct import *
+from modelopt.torch._compress.anymodel.models.qwen3_vl_30b_a3b_instruct.qwen3_vl_30b_a3b_instruct_converter import (
+    Qwen3VL30BA3BInstructConverter,
+)
+from modelopt.torch._compress.anymodel.models.qwen3_vl_30b_a3b_instruct.qwen3_vl_30b_a3b_instruct_model_descriptor import (
+    Qwen3VL30BA3BInstructModelDescriptor,
+)

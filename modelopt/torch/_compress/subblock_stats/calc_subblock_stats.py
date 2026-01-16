@@ -32,6 +32,10 @@ from immutabledict import immutabledict
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from tqdm import tqdm
 
+from modelopt.torch._compress.anymodel.model_descriptor import (
+    ModelDescriptor,
+    ModelDescriptorFactory,
+)
 from modelopt.torch._compress.decilm.deci_lm_hf_code.block_config import (
     AttentionConfig,
     BlockConfig,
@@ -224,10 +228,12 @@ def launch_calc_subblock_stats(cfg: DictConfig) -> None:
         f"Calc subblock stats config: {format_global_config(cfg.calc_subblock_stats, title='Calc subblock stats')}"
     )
 
+    descriptor = ModelDescriptorFactory.get(cfg.descriptor)
     calculate_subblock_stats_for_puzzle_dir(
         cfg.calc_subblock_stats,
         master_puzzle_dir=cfg.puzzle_dir,
         teacher_dir=cfg.teacher_dir,
+        descriptor=descriptor,
         model_hidden_sizes=cfg.calc_subblock_stats.get("model_hidden_sizes", OmegaConf.create([])),
         ffn_hidden_sizes=cfg.calc_subblock_stats.get("ffn_hidden_sizes", OmegaConf.create([])),
         batch_sizes=cfg.calc_subblock_stats.batch_sizes,
@@ -247,6 +253,7 @@ def calculate_subblock_stats_for_puzzle_dir(
     calc_subblock_stats_config: DictConfig,
     master_puzzle_dir: Path | str,
     teacher_dir: Path | str,
+    descriptor: Type[ModelDescriptor],
     model_hidden_sizes: ListConfig,
     ffn_hidden_sizes: ListConfig,
     batch_sizes: Iterable[int] = (1, 8, 16, 32, 64, 128, 256),
@@ -279,6 +286,8 @@ def calculate_subblock_stats_for_puzzle_dir(
         Path(teacher_dir) if teacher_dir is not None else master_puzzle_dir / "ckpts" / "teacher"
     )
     model_config = load_model_config(teacher_dir)
+    # Get language model config for LM-specific attributes (VL models have nested config)
+    lm_config = descriptor.get_language_model_config(model_config)
     subblock_configs = _load_subblock_configs(master_puzzle_dir, ffn_hidden_sizes, model_config)
 
     subblock_stats_file = master_puzzle_dir / subblock_stats_filename
@@ -310,7 +319,7 @@ def calculate_subblock_stats_for_puzzle_dir(
     ]
 
     model_hidden_sizes = model_hidden_sizes + [
-        model_config.hidden_size
+        lm_config.hidden_size
     ]  # add a teacher model hidden size
     for batch_size, (
         weights_dtype,
@@ -334,8 +343,8 @@ def calculate_subblock_stats_for_puzzle_dir(
             generation_seq_len=generation_seq_len,
             prefill_queue_size=prefill_queue_size,
             n_embd=model_hidden_size,
-            n_head=model_config.num_attention_heads,
-            vocab_size=model_config.vocab_size,
+            n_head=lm_config.num_attention_heads,
+            vocab_size=lm_config.vocab_size,
             benchmark_iterations=curr_benchmark_iterations,
             use_cuda_graph=True,
             weights_dtype=weights_dtype,

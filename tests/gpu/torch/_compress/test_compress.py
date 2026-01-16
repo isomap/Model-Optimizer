@@ -53,6 +53,7 @@ from modelopt.torch._compress.anymodel import convert_model
             False,
         ),
         ("qwen3-8b", "qwen3", "qwen3-8b", None, False),
+        ("qwen3-vl-30b-a3b-instruct", "qwen3_vl", "qwen3-vl-30b-a3b-instruct", None, True),
         ("nemotron-nano-12b-v2", "nemotron_h_v2", "nemotron-nano-12b-v2", "*-", False),
         (
             "nemotron-3-nano-30b-a3b-base-bf16",

@@ -196,6 +196,7 @@ def validate_model(
             torch, getattr(args, "autocast_dtype", "torch.bfloat16").strip("torch.")
         ),
         descriptor=descriptor,
+        use_autocast=descriptor.uses_autocast(),
     )
 
     if losses is not None:

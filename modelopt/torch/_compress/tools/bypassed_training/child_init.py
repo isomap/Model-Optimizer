@@ -381,27 +381,31 @@ def create_child_state_dict(
             else:
                 out_state_dict[key] = tensor
 
+    # Get language model config for LM-specific attributes (VL models have nested config)
+    original_lm_config = descriptor.get_language_model_config(original_config)
+    new_lm_config = descriptor.get_language_model_config(new_config)
+
     # Check if original model is MHA (all layers have num_key_value_heads == num_attention_heads)
     original_num_kv_heads_per_layer = [
         b.attention.num_key_value_heads for b in original_config.block_configs
     ]
-    num_attention_heads = original_config.num_attention_heads
+    num_attention_heads = original_lm_config.num_attention_heads
     is_original_mha = all(kv == num_attention_heads for kv in original_num_kv_heads_per_layer)
-    is_same_hidden_size = original_config.hidden_size == new_config.hidden_size
-    head_size = _get_head_dim(new_config)
-    orig_head_size = _get_head_dim(original_config)
+    is_same_hidden_size = original_lm_config.hidden_size == new_lm_config.hidden_size
+    head_size = _get_head_dim(new_lm_config)
+    orig_head_size = _get_head_dim(original_lm_config)
     assert head_size == orig_head_size, f"head_size {head_size} != orig_head_size {orig_head_size}"
 
     # Allow different hidden sizes for pruning
     if not is_same_hidden_size:
-        assert new_config.hidden_size <= original_config.hidden_size, (
-            f"New hidden size ({new_config.hidden_size}) must be <= original ({original_config.hidden_size})"
+        assert new_lm_config.hidden_size <= original_lm_config.hidden_size, (
+            f"New hidden size ({new_lm_config.hidden_size}) must be <= original ({original_lm_config.hidden_size})"
         )
         assert hidden_size_init_mode != HiddenSizeInitMode.CopyAsIs, (
             "Cannot copy as is when hidden sizes differ"
         )
 
-    hidden_size = original_config.hidden_size
+    hidden_size = original_lm_config.hidden_size
 
     ignored_keys = set([key for key in original_state_dict.keys() if ignore_fn(key)])
     for key in ignored_keys:
@@ -503,6 +507,7 @@ def create_child_state_dict(
             original_state_dict,
             new_config,
             original_config,
+            descriptor,
             hidden_size_init_mode,
             channel_importance_path,
             owned_block_indexes,
@@ -890,6 +895,7 @@ def _apply_hidden_size_pruning(
     original_state_dict: dict[str, torch.Tensor],
     new_config: DeciLMConfig,
     original_config: DeciLMConfig,
+    descriptor,
     hidden_size_init_mode: HiddenSizeInitMode,
     channel_importance_path: Optional[str] = None,
     owned_block_indexes: Optional[list[int]] = None,
@@ -901,8 +907,12 @@ def _apply_hidden_size_pruning(
     if isinstance(hidden_size_init_mode, str):
         hidden_size_init_mode = HiddenSizeInitMode(hidden_size_init_mode)
 
-    original_hidden_size = original_config.hidden_size
-    new_hidden_size = new_config.hidden_size
+    # Get language model config (for VL models this extracts the nested config)
+    original_lm_config = descriptor.get_language_model_config(original_config)
+    new_lm_config = descriptor.get_language_model_config(new_config)
+
+    original_hidden_size = original_lm_config.hidden_size
+    new_hidden_size = new_lm_config.hidden_size
 
     if hidden_size_init_mode == HiddenSizeInitMode.CopyAsIs:
         return out_state_dict
