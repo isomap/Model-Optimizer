@@ -87,6 +87,7 @@ from .quant_utils import (
     get_weight_block_size,
     get_weight_scaling_factor,
     get_weight_scaling_factor_2,
+    has_quantized_modules,
     maybe_transpose_expert_weight_dimensions,
     postprocess_state_dict,
     preprocess_linear_fusion,
@@ -763,21 +764,6 @@ def _fuse_qkv_linears_diffusion(model: nn.Module) -> None:
     )
 
 
-def _has_quantized_modules(model: nn.Module) -> bool:
-    """Check if a model has any quantized modules.
-
-    Args:
-        model: The model to check.
-
-    Returns:
-        True if the model contains quantized modules, False otherwise.
-    """
-    return any(
-        get_quantization_format(sub_module) != QUANTIZATION_NONE
-        for _, sub_module in model.named_modules()
-    )
-
-
 def _export_diffusers_checkpoint(
     pipe: "DiffusionPipeline | ModelMixin",
     dtype: torch.dtype | None,
@@ -817,7 +803,7 @@ def _export_diffusers_checkpoint(
 
     # Step 3: Export each nn.Module component with quantization handling
     for component_name, component in module_components.items():
-        is_quantized = _has_quantized_modules(component)
+        is_quantized = has_quantized_modules(component)
         status = "quantized" if is_quantized else "non-quantized"
         print(f"Exporting component: {component_name} ({status})")
 
