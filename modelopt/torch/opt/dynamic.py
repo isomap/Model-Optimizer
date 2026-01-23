@@ -584,6 +584,14 @@ class DynamicModule(nn.Module):
             assert not is_dynamic, "Exported module must not be a DynamicModule anymore!"
             delattr(self, "_dm_attribute_manager")
 
+            # If this module had a monkey-patched forward before DynamicModule.convert(), we may have
+            # overridden it by binding the dynamic forward onto the instance (to follow the MRO).
+            # On final export, restore the original forward to avoid leaking a dynamic forward
+            # (e.g., DistillationModel.forward) onto the exported (non-dynamic) module instance.
+            if hasattr(self, "_forward_pre_dm"):
+                setattr(self, "forward", getattr(self, "_forward_pre_dm"))
+                delattr(self, "_forward_pre_dm")
+
         return self
 
     @classmethod
