@@ -829,7 +829,8 @@ class ExportManager:
         mto.restore(backbone, str(self.config.restore_from))
         self.logger.info("Model restored successfully")
 
-    def export_hf_ckpt(self, pipe: DiffusionPipeline) -> None:
+    # TODO: should not do the any data type
+    def export_hf_ckpt(self, pipe: Any) -> None:
         """
         Export quantized model to HuggingFace checkpoint format.
 
