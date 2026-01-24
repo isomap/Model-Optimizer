@@ -111,7 +111,22 @@ class QuantInputBase(QuantModule):
         """Quantize the input before calling the original forward method."""
         input = self.input_quantizer(input)
         if hasattr(self, "_forward_pre_dm"):
-            output = self._forward_pre_dm(input, *args, **kwargs)
+            pre_fwd = getattr(self, "_forward_pre_dm")
+
+            def _is_forward_in_mro(bound_or_func) -> bool:
+                # If this is a bound method, compare its underlying function to any `forward`
+                # implementation in the current MRO. If it matches, it's not an external monkey-patch.
+                if hasattr(bound_or_func, "__func__"):
+                    fn = bound_or_func.__func__
+                    for cls in type(self).mro():
+                        if cls.__dict__.get("forward") is fn:
+                            return True
+                return False
+
+            if pre_fwd is getattr(self, "forward") or _is_forward_in_mro(pre_fwd):
+                output = super().forward(input, *args, **kwargs)
+            else:
+                output = pre_fwd(input, *args, **kwargs)
         else:
             output = super().forward(input, *args, **kwargs)
         if isinstance(output, tuple):
