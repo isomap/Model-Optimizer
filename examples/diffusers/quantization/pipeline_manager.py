@@ -18,9 +18,8 @@ from typing import Any
 
 import torch
 from diffusers import DiffusionPipeline, LTXLatentUpsamplePipeline
-
-from .models_utils import MODEL_DEFAULTS, MODEL_PIPELINE, MODEL_REGISTRY, ModelType
-from .quantize import ModelConfig
+from models_utils import MODEL_DEFAULTS, MODEL_PIPELINE, MODEL_REGISTRY, ModelType
+from quantize_config import ModelConfig
 
 
 class PipelineManager:

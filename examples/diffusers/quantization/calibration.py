@@ -17,12 +17,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from models_utils import MODEL_DEFAULTS, ModelType
+from pipeline_manager import PipelineManager
+from quantize_config import CalibrationConfig
 from tqdm import tqdm
-
-from .models_utils import MODEL_DEFAULTS, ModelType
-from .pipeline_manager import PipelineManager
-from .quantize import CalibrationConfig
-from .utils import load_calib_prompts
+from utils import load_calib_prompts
 
 
 class Calibrator:
@@ -100,7 +99,7 @@ class Calibrator:
                         "prompt": prompt_batch,
                         "num_inference_steps": self.config.n_steps,
                     }
-                    self.pipe(**common_args, **extra_args).images  # type: ignore[misc]
+                    self.pipe(**common_args, **extra_args).images
                 pbar.update(1)
                 self.logger.debug(f"Completed calibration batch {i + 1}/{self.config.num_batches}")
         self.logger.info("Calibration completed successfully")
@@ -118,7 +117,7 @@ class Calibrator:
             kwargs["guidance_scale_2"] = extra_args["guidance_scale_2"]
         kwargs["num_inference_steps"] = self.config.n_steps
 
-        self.pipe(prompt=prompt_batch, **kwargs).frames  # type: ignore[misc]
+        self.pipe(prompt=prompt_batch, **kwargs).frames
 
     def _run_ltx2_calibration(self, prompt_batch: list[str], extra_args: dict[str, Any]) -> None:
         from ltx_core.model.video_vae import TilingConfig
@@ -141,7 +140,7 @@ class Calibrator:
             "images": extra_params.get("images", []),
             "tiling_config": extra_params.get("tiling_config", TilingConfig.default()),
         }
-        self.pipe(prompt=prompt, **kwargs)  # type: ignore[misc]
+        self.pipe(prompt=prompt, **kwargs)
 
     def _run_ltx_video_calibration(
         self, prompt_batch: list[str], extra_args: dict[str, Any]
@@ -162,8 +161,8 @@ class Calibrator:
         )
 
         def round_to_nearest_resolution_acceptable_by_vae(height, width):
-            height = height - (height % self.pipe.vae_spatial_compression_ratio)  # type: ignore[union-attr]
-            width = width - (width % self.pipe.vae_spatial_compression_ratio)  # type: ignore[union-attr]
+            height = height - (height % self.pipe.vae_spatial_compression_ratio)
+            width = width - (width % self.pipe.vae_spatial_compression_ratio)
             return height, width
 
         downscale_factor = 2 / 3
@@ -177,7 +176,7 @@ class Calibrator:
         )
 
         # Generate initial latents at lower resolution
-        latents = self.pipe(  # type: ignore[misc]
+        latents = self.pipe(
             conditions=None,
             prompt=prompt_batch,
             negative_prompt=negative_prompt,
