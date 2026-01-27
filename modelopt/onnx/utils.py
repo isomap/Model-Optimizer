@@ -15,6 +15,7 @@
 
 """Utility functions related to onnx."""
 
+import copy
 import io
 import os
 import tempfile
@@ -29,6 +30,9 @@ from onnx.helper import get_attribute_value
 from onnx_graphsurgeon import Constant, Node, Variable
 
 from modelopt.onnx.logging_config import logger
+
+# Base minimum opset for quantization (opset 19 is the first to support fp16 scales)
+BASE_MIN_OPSET = 19
 
 
 def get_input_names_from_bytes(model_bytes: bytes, external_inputs_only: bool = True) -> list[str]:
@@ -552,7 +556,7 @@ def duplicate_shared_constants(onnx_model: onnx.ModelProto) -> tuple[onnx.ModelP
     return onnx_model, is_modified
 
 
-def check_model(model: onnx.ModelProto) -> onnx.ModelProto:
+def check_model(model: onnx.ModelProto) -> None:
     """Checks if the given model is valid."""
     if model.ByteSize() > (2 * (1024**3)):  # 2GB limit
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -561,10 +565,8 @@ def check_model(model: onnx.ModelProto) -> onnx.ModelProto:
             onnx_tmp_path = os.path.join(temp_dir, f"model_{unique_id}.onnx")
             save_onnx(model, onnx_tmp_path, save_as_external_data=True)
             onnx.checker.check_model(onnx_tmp_path)
-            return onnx.load(onnx_tmp_path)
     else:
         onnx.checker.check_model(model)
-        return model
 
 
 def find_lowest_common_ancestor(node1: Node, node2: Node) -> tuple[str | None, int, int]:
@@ -658,15 +660,16 @@ def save_onnx(model: onnx.ModelProto, onnx_path: str, save_as_external_data: boo
 
     # Set ir_version to 10, remove it once ORT supports ir_version 11
     model.ir_version = 10
-
     if save_as_external_data:
         external_data_path = os.path.basename(onnx_path) + "_data"
         if os.path.exists(external_data_path):
             logger.warning(f"Removing existing external data file: {external_data_path}")
             os.remove(external_data_path)
 
+        # Copy so the onnx.ModelProto object will not be modified
+        model_copy = copy.deepcopy(model)
         onnx.save_model(
-            model,
+            model_copy,
             onnx_path,
             save_as_external_data=True,
             all_tensors_to_one_file=True,
@@ -694,6 +697,75 @@ def get_opset_version(model: onnx.ModelProto) -> int:
         if not opset.domain or opset.domain in ["ai.onnx", "ai.onnx.contrib", "trt.plugins"]
     ]
     return ai_onnx_domain[0].version
+
+
+def check_model_uses_external_data(model: onnx.ModelProto) -> bool:
+    """Checks if the model uses external data. True if any initializer tensor has data_location set to EXTERNAL."""
+    return any(
+        init.HasField("data_location") and init.data_location == onnx.TensorProto.EXTERNAL
+        for init in model.graph.initializer
+    )
+
+
+def get_qdq_precisions(model: onnx.ModelProto) -> set:
+    """Gets the Q/DQ precision types present in the model.
+
+    Args:
+        model: Loaded in-memory onnx ModelProto.
+
+    Returns:
+        set: Set of Q/DQ precision types present in the model (e.g., 'float8_e4m3fn', 'int8',
+             'int4', 'float4_e2m1fn').
+    """
+    graph = gs.import_onnx(model)
+    precisions = set()
+
+    # Check for custom 'NVFP4' nodes
+    custom_fp4_q_nodes = [node for node in graph.nodes if node.op == "TRT_FP4DynamicQuantize"]
+    if custom_fp4_q_nodes:
+        precisions.add("float4_e2m1fn")
+
+    # Check for precision in DQ nodes
+    dq_nodes = [node for node in graph.nodes if node.op == "DequantizeLinear"]
+    for dq_node in dq_nodes:
+        if len(dq_node.inputs) >= 3 and dq_node.inputs[2] is not None:
+            # If zero-point is set, return that as the quantization mode
+            if isinstance(dq_node.inputs[2], Constant) and dq_node.inputs[2].values is not None:
+                precisions.add(dq_node.inputs[2].values.dtype.name)
+        elif isinstance(dq_node.inputs[0], Constant) and dq_node.inputs[0].values is not None:
+            # Else, return the node's input precision (ex: 'NVFP4' weight quantization)
+            precisions.add(dq_node.inputs[0].values.dtype.name)
+
+    return precisions
+
+
+# Minimum opset requirements by quantization mode/precision
+# Base minimum is 19 (first opset that allows fp16 scales in Q/DQ nodes)
+# Supports both quantize modes (e.g., "fp8") and dtype prefixes (e.g., "float8" for "float8_e4m3fn")
+QDQ_PRECISION_MIN_OPSET = {
+    "int8": BASE_MIN_OPSET,
+    "float8_e4m3fn": BASE_MIN_OPSET,
+    "int4": 21,
+    "uint4": 21,
+    "float4_e2m1fn": 23,
+}
+
+
+def get_min_opset_for_precisions(precisions: set) -> int:
+    """Gets the minimum required opset version for a set of Q/DQ precision types.
+
+    Args:
+        precisions: Set of precision type strings (e.g., 'float8_e4m3fn', 'int4').
+
+    Returns:
+        int: Minimum required opset version for the given precisions.
+    """
+    min_opset = BASE_MIN_OPSET  # Base minimum for fp16 scales support
+    for precision in precisions:
+        # Direct lookup first
+        if precision in QDQ_PRECISION_MIN_OPSET:
+            min_opset = max(min_opset, QDQ_PRECISION_MIN_OPSET[precision])
+    return min_opset
 
 
 def bfloat16_to_float32(bf16_array):

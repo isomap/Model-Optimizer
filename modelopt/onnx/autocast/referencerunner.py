@@ -24,12 +24,15 @@ outputs during precision conversion.
 import copy
 import io
 import sys
+import tempfile
 from collections import OrderedDict
 
 import numpy as np
 import onnx
 
+from modelopt.onnx import utils as onnx_utils
 from modelopt.onnx.autocast.logging_config import configure_logging, logger
+from modelopt.onnx.quantization.calib_utils import CalibrationDataProvider
 from modelopt.onnx.quantization.ort_utils import _prepare_ep_list
 
 configure_logging()
@@ -70,7 +73,13 @@ class ReferenceRunner:
 
     def _load_inputs_from_npz(self, input_data_path):
         """Load inputs from NPZ format."""
-        return [np.load(input_data_path)]
+        calib_data = np.load(input_data_path)
+
+        if isinstance(calib_data, np.lib.npyio.NpzFile):
+            # Wrap data into a CalibDataProvider to support a single NPZ file containing data from multiple batches
+            data_loader = {key: calib_data[key] for key in calib_data.files}
+            return CalibrationDataProvider(self.model, data_loader).calibration_data_list
+        return [calib_data]
 
     def _validate_inputs(self, data_loader):
         """Validate that input names and shapes match the model."""
@@ -118,13 +127,42 @@ class ReferenceRunner:
 
         return data_loader
 
+    def _get_ort_runner(self, model):
+        from polygraphy.backend.onnx import BytesFromOnnx
+        from polygraphy.backend.onnxrt import OnnxrtRunner, SessionFromOnnx
+
+        # Check if model has external data by checking:
+        # 1. If any initializer has data_location set to EXTERNAL (even if data is loaded)
+        # 2. If model size would exceed 2GB (indicating need for external data)
+        needs_external_data = onnx_utils.check_model_uses_external_data(
+            self.model
+        ) or self.model.ByteSize() > 2 * (1024**3)
+        if needs_external_data:
+            logger.debug("Model has external data, using file-based approach")
+            # Get the actual ONNX ModelProto from ModifyOutputs wrapper
+            modified_model = model()
+
+            # Use a persistent temp file, because we need the file to be present in an broader context
+            tmp_file = tempfile.NamedTemporaryFile(suffix=".onnx", delete=False)
+            tmp_file.close()
+            tmp_file_path = tmp_file.name
+            onnx_utils.save_onnx(modified_model, tmp_file_path, save_as_external_data=True)
+            logger.debug(f"Model with all outputs saved to {tmp_file_path}")
+            build_onnxrt_session = SessionFromOnnx(tmp_file_path, providers=self.providers)
+
+        else:
+            # For models without external data, use the original BytesFromOnnx approach (no tmp files)
+            logger.debug("Model has no external data, using BytesFromOnnx approach")
+            serialize_onnx = BytesFromOnnx(model)
+            build_onnxrt_session = SessionFromOnnx(serialize_onnx, providers=self.providers)
+        runners = [OnnxrtRunner(build_onnxrt_session)]
+        return runners
+
     def run(self, inputs=None):
         """Run FP32 inference with provided or random inputs."""
         import onnxruntime as ort
         from polygraphy import constants
-        from polygraphy.backend.onnx import BytesFromOnnx
         from polygraphy.backend.onnx import ModifyOutputs as ModifyOnnxOutputs
-        from polygraphy.backend.onnxrt import OnnxrtRunner, SessionFromOnnx
         from polygraphy.comparator import Comparator
 
         logger.info("Running ONNX Runtime to obtain reference outputs (this may take a while)...")
@@ -133,9 +171,9 @@ class ReferenceRunner:
 
         model_copy = copy.deepcopy(self.model)
         modify_outputs = ModifyOnnxOutputs(model_copy, outputs=constants.MARK_ALL)
-        serialize_onnx = BytesFromOnnx(modify_outputs)
-        build_onnxrt_session = SessionFromOnnx(serialize_onnx, providers=self.providers)
-        runners = [OnnxrtRunner(build_onnxrt_session)]
+
+        # Load the modified model and create an inference session
+        runners = self._get_ort_runner(modify_outputs)
 
         # Comparator is used despite the fact that we are using ONNXRuntime
         # because it provides the ability to generate random inputs using DataLoader
