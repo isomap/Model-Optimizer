@@ -165,7 +165,7 @@ class PuzzletronDescriptor(ModeDescriptor):
     @property
     def name(self) -> str:
         """String identifier for this mode."""
-        return "compress"
+        return "puzzletron"
 
     @property
     def config_class(self) -> type[ModeloptBaseConfig]:
