@@ -117,7 +117,7 @@ def calc_subblock_active_params(
 
 
 def load_moe_stats(stats_file: str) -> dict:
-    with open(stats_file, "r") as f:
+    with open(stats_file) as f:
         stats = json.load(f)
     return [np.array(l) / np.sum(l) if len(l) > 0 else 0 for l in stats]
 
@@ -178,10 +178,9 @@ def calculate_attention_memory(
     kv_cache_dtype: torch.dtype,
     allocate_prefill_query: bool,
 ) -> dict[str, float]:
-    """
-    allocate_prefill_query: infery-llm style.
-        Infery used a unified Wqkv matrix, so before extracting the kv-cache,
-        the query also had to be kept in-memory, once per layer.
+    """allocate_prefill_query: infery-llm style.
+    Infery used a unified Wqkv matrix, so before extracting the kv-cache,
+    the query also had to be kept in-memory, once per layer.
     """
     seq_len = prefill_seq_len + generation_seq_len
     if (

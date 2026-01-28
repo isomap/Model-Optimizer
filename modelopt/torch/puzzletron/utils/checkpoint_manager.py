@@ -13,14 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Checkpoint manager for activation hook scoring with periodic saves and resume support.
-"""
+"""Checkpoint manager for activation hook scoring with periodic saves and resume support."""
 
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import modelopt.torch.utils.distributed as dist
 from modelopt.torch.puzzletron.tools.logger import aprint, mprint
@@ -30,8 +28,7 @@ class ScoringCheckpointManager:
     """Manages checkpointing for activation hook scoring with periodic saves."""
 
     def __init__(self, checkpoint_dir: str, activation_hooks=None, checkpoint_interval: int = 100):
-        """
-        Initialize checkpoint manager.
+        """Initialize checkpoint manager.
 
         Args:
             checkpoint_dir: Directory to save checkpoints
@@ -63,9 +60,8 @@ class ScoringCheckpointManager:
         if self.is_main_process:
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_checkpoint(self) -> Optional[Dict[str, Any]]:
-        """
-        Load existing checkpoint if available, including hook states.
+    def load_checkpoint(self) -> dict[str, Any] | None:
+        """Load existing checkpoint if available, including hook states.
 
         Returns:
             Dict with checkpoint info or None if no checkpoint exists
@@ -76,7 +72,7 @@ class ScoringCheckpointManager:
             return None
 
         try:
-            with open(self.progress_file, "r") as f:
+            with open(self.progress_file) as f:
                 checkpoint_data = json.load(f)
 
             # Validate checkpoint
@@ -114,8 +110,7 @@ class ScoringCheckpointManager:
         return None
 
     def load_hook_states(self, activation_hooks) -> bool:
-        """
-        Load hook states from checkpoint files.
+        """Load hook states from checkpoint files.
 
         Args:
             activation_hooks: Hook objects to load states into
@@ -173,8 +168,7 @@ class ScoringCheckpointManager:
         return should_skip
 
     def update_progress(self, batch_idx: int, total_batches: int):
-        """
-        Update progress and potentially save checkpoint.
+        """Update progress and potentially save checkpoint.
 
         Args:
             batch_idx: Current batch index
@@ -207,8 +201,7 @@ class ScoringCheckpointManager:
             dist.barrier()
 
     def save_checkpoint(self):
-        """
-        Save current checkpoint to disk (progress info only).
+        """Save current checkpoint to disk (progress info only).
         Hook states are saved separately in update_progress.
         """
         try:

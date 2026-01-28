@@ -20,9 +20,10 @@ import argparse
 import dataclasses
 import enum
 import json
+from collections.abc import Hashable, Iterable
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Hashable, Iterable, List, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import yaml
@@ -418,7 +419,7 @@ def _assert_valid_config(args, puzzle_profile):
         exit(1)
 
 
-def _get_minimal_unique_names(dicts: List[dict]) -> List[str]:
+def _get_minimal_unique_names(dicts: list[dict]) -> list[str]:
     all_keys = set(k for d in dicts for k in d.keys())
     all_values = {k: set(d[k] for d in dicts if k in d) for k in all_keys}
     non_common_keys = [k for k, values in all_values.items() if len(values) > 1]
@@ -426,7 +427,7 @@ def _get_minimal_unique_names(dicts: List[dict]) -> List[str]:
     return ["-".join(f"{k}_{d[k]}".replace(".", "_") for k in non_common_keys) for d in dicts]
 
 
-def run_puzzle(args: argparse.Namespace | DictConfig) -> List[str]:
+def run_puzzle(args: argparse.Namespace | DictConfig) -> list[str]:
     # Loads config from args/puzzle_profile
     if args.puzzle_profile is not None:
         with open(args.puzzle_profile) as f:
@@ -578,9 +579,7 @@ def _parse_teacher_block_metrics(
             "block_idx": block_idx,
             "parent_layer_indices": [block_idx],
             "metrics": {
-                **{
-                    metric_name: 0.0 for metric_name in all_metric_names
-                },  # default value 0. for teacher
+                **dict.fromkeys(all_metric_names, 0.0),  # default value 0. for teacher
                 **_extract_average_metrics(raw_metrics),  # override with real value if exists
             },
             **(
@@ -597,7 +596,7 @@ def _parse_teacher_block_metrics(
 
 def _extract_average_metrics(raw_metrics: dict[str, dict]) -> dict[str, float]:
     average_metrics = dict()
-    for metric_name in raw_metrics.keys():
+    for metric_name in raw_metrics:
         metric_dict = raw_metrics[metric_name]
         if isinstance(metric_dict, dict) and ("avg" in metric_dict.keys()):
             metric_value = raw_metrics[metric_name]["avg"]

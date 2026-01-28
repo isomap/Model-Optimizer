@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-DataLoader utilities for language model training and validation.
-"""
+"""DataLoader utilities for language model training and validation."""
 
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial

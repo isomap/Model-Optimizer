@@ -36,6 +36,8 @@ from ..utils import (
 
 @dataclass
 class InputArgs:
+    """Container for input arguments to modules."""
+
     args: list[Any]
     kwargs: dict[str, Any]
 

@@ -19,12 +19,10 @@
 import os
 import re
 from glob import glob
-from pathlib import Path
 
 import hydra
 import numpy as np
 import pandas as pd
-import torch
 from omegaconf import DictConfig
 
 import modelopt.torch.utils.distributed as dist

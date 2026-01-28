@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Compress NAS plugin for the Modelopt framework (based on Puzzle algorithm: https://arxiv.org/abs/2411.19146).
+Puzzletron NAS plugin for the Modelopt framework (based on Puzzle algorithm: https://arxiv.org/abs/2411.19146).
 
 It is used by mtn.convert() to convert a model from HF format to Puzzletron heterogeneous format + do pruning scoring
 and save pruned checkpoints, and by mtn.search() to perform the MIP-based NAS search.
@@ -54,7 +54,7 @@ class PuzzletronModel(nn.Module):
 
 
 class PuzzletronConfig(ModeloptBaseConfig):
-    """Configuration for Compress NAS algorithm."""
+    """Configuration for Puzzletron NAS algorithm."""
 
     # Input model path to compress in the HF format
     input_model_path: str = ModeloptField(
@@ -120,7 +120,7 @@ def convert_puzzletron_model(model: nn.Module, config: PuzzletronConfig) -> Conv
     # Convert HuggingFace model to Puzzletron heterogeneous format (generic, uses descriptor from config)
     if dist.is_master():
         mprint(
-            "Compress Progress 2/8: converting model to Puzzletron heterogeneous format (single-gpu)"
+            "Puzzletron Progress 2/8: converting model to Puzzletron heterogeneous format (single-gpu)"
         )
         hf_ckpt_teacher_dir = "ckpts/teacher"  # TODO: make it configurable
 
@@ -137,13 +137,13 @@ def convert_puzzletron_model(model: nn.Module, config: PuzzletronConfig) -> Conv
     dist.barrier()
 
     # Score_pruning_activations (distributed processing)
-    mprint("Compress Progress 3/8: scoring pruning activations (multi-gpu)")
+    mprint("Puzzletron Progress 3/8: scoring pruning activations (multi-gpu)")
     score_pruning_activations.launch_score_activations(hydra_cfg)
 
     # Prune the model and save pruned checkpoints
     if dist.is_master():
         mprint(
-            "Compress Progress 4/8: pruning the model and saving pruned checkpoints (single-gpu)"
+            "Puzzletron Progress 4/8: pruning the model and saving pruned checkpoints (single-gpu)"
         )
         pruning_ckpts.launch_prune_ckpt(hydra_cfg)
     dist.barrier()
@@ -160,7 +160,7 @@ def restore_puzzletron_model(
 
 @NASModeRegistry.register_mode
 class PuzzletronDescriptor(ModeDescriptor):
-    """Descriptor for the Compress mode."""
+    """Descriptor for the Puzzletron mode."""
 
     @property
     def name(self) -> str:
@@ -198,7 +198,7 @@ class PuzzletronDescriptor(ModeDescriptor):
 
 
 class PuzzletronSearcher(BaseSearcher):
-    """Runs NAS search for the Compress mode."""
+    """Runs NAS search for the Puzzletron mode."""
 
     @property
     def default_state_dict(self) -> SearchStateDict:
@@ -221,15 +221,15 @@ class PuzzletronSearcher(BaseSearcher):
         # Build_library_and_stats (single process)
         if dist.is_master():
             mprint(
-                "Compress Progress 5/8: building replacement library and subblock statistics (single-gpu)"
+                "Puzzletron Progress 5/8: building replacement library and subblock statistics (single-gpu)"
             )
             build_library_and_stats.launch_build_library_and_stats(hydra_cfg)
         dist.barrier()
 
         # Calc_one_block_scores (distributed processing)
-        mprint("Compress Progress 6/8: calculating one block scores (multi-gpu)")
+        mprint("Puzzletron Progress 6/8: calculating one block scores (multi-gpu)")
         scoring.launch_scoring(hydra_cfg)
 
         # mip_and_realize_models (distributed processing)
-        mprint("Compress Progress 7/8: running MIP and realizing models (multi-gpu)")
+        mprint("Puzzletron Progress 7/8: running MIP and realizing models (multi-gpu)")
         mip_and_realize_models.launch_mip_and_realize_model(hydra_cfg)

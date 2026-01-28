@@ -48,13 +48,15 @@ class DistributedLogger(logging.Logger):
         self.world_size = int(os.environ.get("WORLD_SIZE", 1))
 
     def dist_log(self, msg: str, ranks: str = "main"):
-        """
-        Log parameter msg with the given ranks.
-        parameter ranks:
-            "all": log with all ranks
-            "main": log with only rank 0 in node 0
-            "last": log with only rank -1 in node 0
-            "local_main": log with only rank 0 in all nodes
+        """Log parameter msg with the given ranks.
+
+        Args:
+            msg: The message to log.
+            ranks: The ranks to log the message to. Choices are:
+                "all": log with all ranks
+                "main": log with only rank 0 in node 0
+                "last": log with only rank -1 in node 0
+                "local_main": log with only rank 0 in all nodes
         """
         # print(msg, ranks)
         if ranks not in ["all", "main", "local_main", "last"]:

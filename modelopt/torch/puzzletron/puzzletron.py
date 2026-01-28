@@ -13,12 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-
-This module provides the main compression function for a model
-using MIP-based NAS search algorithm.
-
-"""
+"""This module provides the main compression function for a model using MIP-based NAS search algorithm."""
 
 import hydra
 from omegaconf import DictConfig
@@ -32,10 +27,10 @@ import modelopt.torch.utils.distributed as dist
 from modelopt.torch.puzzletron.tools.hydra_utils import initialize_hydra_config_for_dir
 
 
-def compress(
+def puzzletron(
     hydra_config_dir: str, hydra_config: str, puzzle_dir: str, dataset_path: str
 ) -> DictConfig:
-    """Compress a puzzletron model using the MIP-based NAS search algorithm.
+    """Compress a model using the MIP-based NAS search algorithm from Puzzletron.
 
     Args:
         hydra_config_dir (str): path to a hydra_config_dir that defines the search space
@@ -46,7 +41,7 @@ def compress(
     Returns:
         Hydra config object after compressing the model.
         The same hydra configuration object is used across all compression steps.
-        @TODO: Investigate if this config object is immutable across steps and clarify
+        TODO: Investigate if this config object is immutable across steps and clarify
     """
     # Step 0: Load puzzletron hydra config
     hydra_cfg = initialize_hydra_config_for_dir(

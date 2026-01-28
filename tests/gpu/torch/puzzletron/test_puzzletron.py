@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 import torch
 from _test_utils.torch.distributed.utils import spawn_multiprocess_job
-from gpu.torch.puzzletron.compress_test_utils import setup_test_model_and_data
+from _test_utils.torch.puzzletron.utils import setup_test_model_and_data
 
 import modelopt.torch.utils.distributed as dist
 from modelopt.torch.puzzletron import puzzletron
@@ -120,7 +120,7 @@ def _test_puzzletron_multiprocess_job(
     dist.barrier()
 
     # Compress the model using a one-click approach
-    puzzletron.compress(
+    puzzletron.puzzletron(
         str(hydra_config_dir), hydra_config_subdir, str(puzzle_dir), str(dataset_path)
     )
 

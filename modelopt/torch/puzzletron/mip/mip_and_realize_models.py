@@ -17,7 +17,6 @@
 
 # mypy: ignore-errors
 from pathlib import Path
-from typing import List
 
 import torch
 from omegaconf import DictConfig
@@ -30,7 +29,7 @@ from modelopt.torch.puzzletron.tools.validate_puzzle_with_multi_replacements imp
 )
 
 
-def launch_mip(cfg: DictConfig) -> List[str]:
+def launch_mip(cfg: DictConfig) -> list[str]:
     solution_paths = run_puzzle(args=cfg.mip)
     return solution_paths
 

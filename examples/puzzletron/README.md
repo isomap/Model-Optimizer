@@ -1,6 +1,6 @@
-# Compress Algorithm Tutorial
+# Puzzletron Algorithm Tutorial
 
-This tutorial demonstrates how to compress large language models using the compress algorithm based on the [Puzzle paper](https://arxiv.org/abs/2411.19146).
+This tutorial demonstrates how to compress large language models using the puzzletron algorithm based on the [Puzzle paper](https://arxiv.org/abs/2411.19146).
 The goal of the algorithm it to find the most optimal modifications to MLP and attention layers of the model, resulting in a heterogeneous model architecture.
 The supported modifications are:
 
@@ -18,7 +18,8 @@ In this example, we compress the [Llama-3.1-8B-Instruct](https://huggingface.co/
 - Install Model-Optimizer in editable mode with the corresponding dependencies:
 
 ```bash
-pip install -e .[hf,compress]
+pip install -e .[hf,puzzletron]
+pip install -r requirements.txt
 ```
 
 - For this example we are using 2x NVIDIA H100 80GB HBM3 to show multi-GPU steps. You can use also use s single GPU.
@@ -53,23 +54,23 @@ hf auth login
 
    We can also set the target size of the resulting model using `num_params = 7_000_000_000`. This will be used as an upper bound for the number of parameters of the model.
 
-3. Run the compression script.
+3. Run the puzzletron pipeline.
 
    ```bash
-   torchrun --nproc_per_node 2 examples/puzzletron/main.py --config examples/puzzletron/configs/llama-3_1-8B_pruneffn_memory/llama-3_1-8B_pruneffn_memory.yaml 2>&1 | tee ./log.txt | grep "Compress Progress"
+   torchrun --nproc_per_node 2 examples/puzzletron/main.py --config examples/puzzletron/configs/llama-3_1-8B_pruneffn_memory/llama-3_1-8B_pruneffn_memory.yaml 2>&1 | tee ./log.txt | grep "Puzzletron Progress"
    ```
 
    This will save the full output to `log.txt` and display the following progress on screen:
 
    ```bash
-   [2025-11-02 12:06:34][rank-0][main.py:71] Compress Progress 1/8: starting compression pipeline
-   [2025-11-02 12:06:45][rank-0][compress_nas_plugin.py:123] Compress Progress 2/8: converting model from HF to DeciLM (single-gpu)
-   [2025-11-02 12:07:07][rank-0][compress_nas_plugin.py:132] Compress Progress 3/8: scoring pruning activations (multi-gpu)
-   [2025-11-02 12:11:36][rank-0][compress_nas_plugin.py:137] Compress Progress 4/8: pruning the model and saving pruned checkpoints (single-gpu)
-   [2025-11-02 12:12:20][rank-0][compress_nas_plugin.py:217] Compress Progress 5/8: building replacement library and subblock statistics (single-gpu)
-   [2025-11-02 12:12:21][rank-0][compress_nas_plugin.py:222] Compress Progress 6/8: calculating one block scores (multi-gpu)
-   [2025-11-02 12:50:41][rank-0][compress_nas_plugin.py:226] Compress Progress 7/8: running MIP and realizing models (multi-gpu)
-   [2025-11-02 12:52:34][rank-0][main.py:115] Compress Progress 8/8: compression pipeline completed (multi-gpu)
+   [2025-11-02 12:06:34][rank-0][main.py:71] Puzzletron Progress 1/8: starting puzzletron pipeline
+   [2025-11-02 12:06:45][rank-0][puzzletron_nas_plugin.py:123] Puzzletron Progress 2/8: converting model from HF to DeciLM (single-gpu)
+   [2025-11-02 12:07:07][rank-0][puzzletron_nas_plugin.py:132] Puzzletron Progress 3/8: scoring pruning activations (multi-gpu)
+   [2025-11-02 12:11:36][rank-0][puzzletron_nas_plugin.py:137] Puzzletron Progress 4/8: pruning the model and saving pruned checkpoints (single-gpu)
+   [2025-11-02 12:12:20][rank-0][puzzletron_nas_plugin.py:217] Puzzletron Progress 5/8: building replacement library and subblock statistics (single-gpu)
+   [2025-11-02 12:12:21][rank-0][puzzletron_nas_plugin.py:222] Puzzletron Progress 6/8: calculating one block scores (multi-gpu)
+   [2025-11-02 12:50:41][rank-0][puzzletron_nas_plugin.py:226] Puzzletron Progress 7/8: running MIP and realizing models (multi-gpu)
+   [2025-11-02 12:52:34][rank-0][main.py:115] Puzzletron Progress 8/8: puzzletron pipeline completed (multi-gpu)
    ```
 
    Once the process is complete, the resulting network architecture will be recorded in `log.txt` for your review:
@@ -134,7 +135,7 @@ This assumes pruning, replacement library building, NAS scoring, and subblock st
 For example, let's set `target_memory: 96_000` in `llama-3_1-8B_pruneffn_memory.yaml`.
 
 ```bash
-torchrun --nproc_per_node 2 examples/puzzletron/main.py --config path/to/llama-3_1-8B_pruneffn_memory.yaml --mip-only 2>&1 | tee ./log.txt | grep "Compress Progress"
+torchrun --nproc_per_node 2 examples/puzzletron/main.py --config path/to/llama-3_1-8B_pruneffn_memory.yaml --mip-only 2>&1 | tee ./log.txt | grep "Puzzletron Progress"
 ```
 
 This will generate the following network architecture (see `log.txt`):
@@ -231,6 +232,24 @@ vllm bench latency --model path/to/model --load-format safetensors --trust-remot
 
 ```bash
 vllm bench throughput --model path/to/model --input-len 2000 --output-len 100 --load-format safetensors --trust-remote-code
+```
+
+## Knowledge Distillation
+
+To recover degradation in the quality of the compressed model, we can use knowledge distillation. This allows transferring the capabilities of the original model to the pruned one. For this, we will use [NeMo framework](https://github.com/NVIDIA-NeMo/NeMo) with the [nemo:25.07](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/nemo?version=25.07) container.
+
+First, convert the HF model to NeMo format:
+
+```bash
+python -m nemo_export/convert_hf_to_nemo --input-ckpt-path path/to/HF-model --output-ckpt-path path/to/save/model-nemo
+```
+
+Now you can utilize all the training features available in NeMo, including distillation. Please refer to the [NeMo distillation documentation](https://docs.nvidia.com/nemo-framework/user-guide/latest/model-optimization/distillation/distillation.html).
+
+[Optional] Once distillation is complete, you can convert the distilled model back to the HuggingFace format.
+
+```bash
+python -m nemo_export/convert_nemo_to_hf --input-ckpt-path path/to/nemo-model --output-ckpt-path path/to/save/model-HF
 ```
 
 ## Advanced Usage

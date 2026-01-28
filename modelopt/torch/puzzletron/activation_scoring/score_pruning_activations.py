@@ -24,8 +24,7 @@ from modelopt.torch.puzzletron.tools.validate_model import validate_model
 
 
 def has_checkpoint_support(activation_hooks_kwargs: dict) -> bool:
-    """
-    Determine if the activation hook method has proper checkpoint support implemented.
+    """Determine if the activation hook method has proper checkpoint support implemented.
 
     Args:
         activation_hooks_kwargs: Hook configuration
@@ -47,8 +46,7 @@ def has_checkpoint_support(activation_hooks_kwargs: dict) -> bool:
 
 
 def check_scoring_completion(activations_log_dir: str, activation_hooks_kwargs=None) -> bool:
-    """
-    Check if scoring is already completed by looking for the expected output files.
+    """Check if scoring is already completed by looking for the expected output files.
     Also checks if the scoring method is safe for resume.
 
     Args:
@@ -89,8 +87,7 @@ def check_scoring_completion(activations_log_dir: str, activation_hooks_kwargs=N
 
 
 def should_skip_scoring_completely(cfg: DictConfig) -> bool:
-    """
-    Determine if we should skip scoring entirely (only if 100% complete).
+    """Determine if we should skip scoring entirely (only if 100% complete).
     Partial progress should proceed to validate_model for proper resume.
 
     Args:

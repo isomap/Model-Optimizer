@@ -13,8 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Convert a Llama3 model to a DeciLM model."""
+"""Convert a Llama3 model to a DeciLM model."""
 
 #!/usr/bin/env python3
 from pathlib import Path

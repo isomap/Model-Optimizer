@@ -16,10 +16,7 @@
 import json
 from pathlib import Path
 
-from gpu.torch.puzzletron.compress_test_utils import (
-    create_and_save_small_llama_model,
-    create_tokenizer,
-)
+from _test_utils.torch.puzzletron.utils import create_and_save_small_llama_model, create_tokenizer
 
 from modelopt.torch.puzzletron.decilm.converters.convert_llama3_to_decilm import (
     convert_llama3_to_decilm,

@@ -14,8 +14,7 @@
 # limitations under the License.
 # mypy: ignore-errors
 
-"""
-It provides general utilities for loading and initializing PyTorch model checkpoints,
+"""It provides general utilities for loading and initializing PyTorch model checkpoints,
 particularly for DeciLM models.
 """
 
@@ -124,9 +123,7 @@ def init_empty_module(
 
 
 def skip_init(module_cls, *args, **kwargs) -> nn.Module:
-    """
-    Heavily inspired by torch.nn.utils.skip_init but does not require the module to accept a "device" kwarg.
-    """
+    """Heavily inspired by torch.nn.utils.skip_init but does not require the module to accept a "device" kwarg."""
     if not issubclass(module_cls, torch.nn.Module):
         raise RuntimeError(f"Expected a Module; got {module_cls}")
 
@@ -165,8 +162,7 @@ def copy_tokenizer(
     target_dir: Path | str,
     on_failure: Literal["raise", "warn"] = "raise",
 ) -> None:
-    """
-    Prefer loading the tokenizer from huggingface hub (when tokenizer_name.txt file is available)
+    """Prefer loading the tokenizer from huggingface hub (when tokenizer_name.txt file is available)
     to avoid collision between transformers versions.
     """
     source_tokenizer_name_path = Path(source_dir_or_tokenizer_name) / "tokenizer_name.txt"

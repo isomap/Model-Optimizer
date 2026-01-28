@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-This module provides helper functions for parsing, sorting, and analyzing layer replacement
+"""This module provides helper functions for parsing, sorting, and analyzing layer replacement
 configurations used in the replacement library for model compression.
 """
 

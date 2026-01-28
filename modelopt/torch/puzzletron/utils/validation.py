@@ -13,8 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Model validation and loss calculation utilities for single-GPU and multi-GPU setups.
+"""Model validation and loss calculation utilities for single-GPU and multi-GPU setups.
 
 Also provides helper functions for loss metrics, KL divergence, JS divergence,
 and similarity losses for knowledge distillation.
@@ -94,8 +93,7 @@ def calculate_losses(
     return_probs: bool = False,
     checkpoint_manager=None,
 ) -> tuple[dict[str, dict], None] | tuple[None, None]:
-    """
-    Do model forward on each batch and calculate LM loss.
+    """Do model forward on each batch and calculate LM loss.
     Works on lit-llama models (single gpu) and huggingface models (can be multi gpu).
     Does not support data-parallel.
 
@@ -313,8 +311,7 @@ def _calculate_teacher_similarity_scores(
     target_logits: torch.Tensor,
     calculate_full_score_ablations: bool,
 ) -> dict[str, list[float]]:
-    """
-    hidden_states: [batch, tokens, n_embd]
+    """hidden_states: [batch, tokens, n_embd]
     target_hidden_states: [batch, tokens, n_embd]
     logits: [batch, tokens, vocab]
     target_logits: [batch, tokens, vocab]
@@ -443,9 +440,7 @@ class ClipEpsilon(Enum):
 def _logits_to_logprobs(
     logits: torch.Tensor, clip_epsilon: ClipEpsilon, epsilon_factor: float
 ) -> torch.Tensor:
-    """
-    logits: [tokens, vocab]
-    """
+    """logits: [tokens, vocab]"""
     logprobs = logits.log_softmax(
         -1
     )  # must normalize logits before clipping otherwise log(1/voacb) means nothing
@@ -467,8 +462,7 @@ def kl_div(
     clip_epsilon: ClipEpsilon = ClipEpsilon.NO_CLIP,
     epsilon_factor: float = 1.0,
 ) -> float:
-    """
-    Kullback-Leibler Divergence for a single sample.
+    """Kullback-Leibler Divergence for a single sample.
     logits: [tokens, vocab]
     target_probs: [tokens, vocab]
     """
@@ -487,8 +481,7 @@ def js_div(
     clip_epsilon: ClipEpsilon = ClipEpsilon.NO_CLIP,
     epsilon_factor: float = 1.0,
 ) -> float:
-    """
-    Jensen-Shannon Divergence for a single sample.
+    """Jensen-Shannon Divergence for a single sample.
     logits: [tokens, vocab]
     target_probs: [tokens, vocab]
     """
@@ -508,8 +501,7 @@ def tv_dist(
     clip_epsilon: ClipEpsilon = ClipEpsilon.NO_CLIP,
     epsilon_factor: float = 1.0,
 ) -> float:
-    """
-    Total Variation Distance (L1-loss) for a single sample.
+    """Total Variation Distance (L1-loss) for a single sample.
     logits: [tokens, vocab]
     target_probs: [tokens, vocab]
     """

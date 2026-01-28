@@ -25,7 +25,10 @@ import modelopt.torch.utils.distributed as dist
 from modelopt.torch.puzzletron.tools.hydra_utils import register_hydra_resolvers
 
 # Path to HF configs relative to this file
-HF_CONFIGS_DIR = Path(__file__).parent / "resources/hf_configs"
+# HF configs are in tests/gpu/torch/puzzletron/resources/hf_configs
+HF_CONFIGS_DIR = (
+    Path(__file__).parent.parent.parent.parent / "gpu/torch/puzzletron/resources/hf_configs"
+)
 
 
 def setup_test_model_and_data(

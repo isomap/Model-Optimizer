@@ -197,6 +197,8 @@ class TargetWithNamedOutputs(Target):
 
 @dataclass
 class ExternalTarget(TargetWithNamedInputs, TargetWithNamedOutputs, metaclass=Singleton):
+    """External target for stitched modules."""
+
     @override
     def __hash__(self) -> int:
         return super().__hash__()

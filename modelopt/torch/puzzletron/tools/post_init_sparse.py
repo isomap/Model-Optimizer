@@ -27,9 +27,7 @@ into a standard format with sparsified weights.
 
 class SparsityMethod:
     def calculate_masks(self, state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        gets a model state_dict, returns a state_dict-like mask_dict with masks
-        """
+        """Gets a model state_dict, returns a state_dict-like mask_dict with masks"""
 
     @staticmethod
     def fix_state_dict_inplace(state_dict, verbose=False, change_dtype=False):
@@ -99,9 +97,7 @@ class SparsityMethod:
 
 class SparsityMethod2o4(SparsityMethod):
     def calculate_masks(self, state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        gets a model state_dict, returns a state_dict-like mask_dict with masks
-        """
+        """Gets a model state_dict, returns a state_dict-like mask_dict with masks"""
         mask_dict = {}
         for key, val in state_dict.items():
             orig_size = val.shape

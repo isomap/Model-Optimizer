@@ -14,14 +14,14 @@
 # limitations under the License.
 
 """
-Main script for running the compress algorithm on large language models (based on Puzzle paper https://arxiv.org/abs/2411.19146).
+Main script for running the puzzletron algorithm on large language models (based on Puzzle paper https://arxiv.org/abs/2411.19146).
 
 This script provides two modes:
-1. Default mode: Runs the full compression pipeline
+1. Default mode: Runs the full puzzletron pipeline
 2. MIP-only mode: Runs only the MIP search and realize models phase
 
 Usage:
-    # Full compression pipeline
+    # Full puzzletron pipeline
     torchrun main.py --config ./configs/llama_3.2_1B_pruneffn_memory.yaml
 
     # Only MIP search and realize models phase
@@ -35,7 +35,7 @@ from pathlib import Path
 import modelopt.torch.nas as mtn
 import modelopt.torch.puzzletron.mip.mip_and_realize_models as mip_and_realize_models
 import modelopt.torch.utils.distributed as dist
-from modelopt.torch.puzzletron.nas.plugins.compress_nas_plugin import CompressModel
+from modelopt.torch.puzzletron.nas.plugins.puzzletron_nas_plugin import PuzzletronModel
 from modelopt.torch.puzzletron.tools.hydra_utils import (
     initialize_hydra_config_for_dir,
     register_hydra_resolvers,
@@ -46,7 +46,7 @@ from modelopt.torch.puzzletron.tools.logger import mprint
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Compress large language models using the Compress algorithm (based on Puzzle paper https://arxiv.org/abs/2411.19146)"
+        description="Compress large language models using the Puzzletron algorithm (based on Puzzle paper https://arxiv.org/abs/2411.19146)"
     )
     parser.add_argument(
         "--config",
@@ -63,13 +63,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def run_full_compress(hydra_config_path: str):
-    """Run the full compression pipeline.
+def run_full_puzzletron(hydra_config_path: str):
+    """Run the full puzzletron pipeline.
 
     Args:
         config_path: Path to the YAML configuration file
     """
-    mprint("Compress Progress 1/8: starting compression pipeline")
+    mprint("Puzzletron Progress 1/8: starting puzzletron pipeline")
     dist.setup(timeout=timedelta(10))
 
     # Register Hydra custom resolvers (needed for config resolution)
@@ -88,12 +88,12 @@ def run_full_compress(hydra_config_path: str):
 
     # Convert model (convert from HF to DeciLM, score pruning activations,
     # prune the model and save pruned checkpoints)
-    input_model = CompressModel()
+    input_model = PuzzletronModel()
     converted_model = mtn.convert(
         input_model,
         mode=[
             (
-                "compress",
+                "puzzletron",
                 {
                     "puzzle_dir": str(hydra_cfg.puzzle_dir),
                     "input_model_path": hydra_cfg.input_hf_model_path,
@@ -115,7 +115,7 @@ def run_full_compress(hydra_config_path: str):
     )
 
     dist.cleanup()
-    mprint("Compress Progress 8/8: compression pipeline completed (multi-gpu)")
+    mprint("Puzzletron Progress 8/8: puzzletron pipeline completed (multi-gpu)")
 
 
 def run_mip_only(hydra_config_path: str):
@@ -144,12 +144,12 @@ def run_mip_only(hydra_config_path: str):
     )
 
     # mip_and_realize_models (distributed processing)
-    # TODO: How to make it part of mnt.search() api, similarly to run_full_compress() API
-    mprint("Compress Progress 7/8: running MIP and realizing models (multi-gpu)")
+    # TODO: How to make it part of mnt.search() api, similarly to run_full_puzzletron() API
+    mprint("Puzzletron Progress 7/8: running MIP and realizing models (multi-gpu)")
     mip_and_realize_models.launch_mip_and_realize_model(hydra_cfg)
 
     dist.cleanup()
-    mprint("Compress Progress 8/8: compression pipeline completed (multi-gpu)")
+    mprint("Puzzletron Progress 8/8: puzzletron pipeline completed (multi-gpu)")
 
 
 def main():
@@ -158,7 +158,7 @@ def main():
     if args.mip_only:
         run_mip_only(hydra_config_path=args.config)
     else:
-        run_full_compress(hydra_config_path=args.config)
+        run_full_puzzletron(hydra_config_path=args.config)
 
 
 if __name__ == "__main__":
