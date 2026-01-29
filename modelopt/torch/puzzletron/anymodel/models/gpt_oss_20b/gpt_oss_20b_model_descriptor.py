@@ -192,13 +192,11 @@ class GptOss20bExpertRemovalLayerDescriptor(ExpertRemovalLayerDescriptor):
     router_weights: List[str] = field(default_factory=lambda: ["router.weight"])
     router_biases: List[str] = field(default_factory=lambda: ["router.bias"])
 
-    # Per-expert format (unquantized models)
-    expert_weights: List[str] = field(
-        default_factory=lambda: ["gate_up_proj.weight", "down_proj.weight"]
-    )
+    # Per-expert format (unquantized models have fused tensors without .weight suffix)
+    expert_weights: List[str] = field(default_factory=lambda: ["gate_up_proj", "down_proj"])
     expert_biases: List[str] = field(
-        default_factory=lambda: ["gate_up_proj.bias", "down_proj.bias"]
+        default_factory=lambda: ["gate_up_proj_bias", "down_proj_bias"]
     )
 
-    # Not fused for unquantized models
-    is_fused_experts: bool = False
+    # Fused format: experts stored as single tensors
+    is_fused_experts: bool = True
