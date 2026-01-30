@@ -80,6 +80,7 @@ mip:
     target_memory: 780_000 # 78_000
 
   mip_constraints:
+    - stats.num_local_experts: 48   # teacher has: 2 layers * 32 experts = 64 total experts
   metric_overrides:
   max_seconds_per_solution: 60
 

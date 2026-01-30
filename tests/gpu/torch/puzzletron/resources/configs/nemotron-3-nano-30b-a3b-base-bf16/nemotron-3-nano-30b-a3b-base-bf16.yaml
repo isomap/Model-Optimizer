@@ -49,7 +49,7 @@ scoring:
   micro_batch_size: 1
   seed: 42
   shuffle_seed: 444
-  dataset_path: ${dataset_path}
+  dataset_path: ${dataset_path}/valid
 
 mip:
   single_block_replacement_validation_dir: ${to_path:${scoring.output_dir}}
@@ -107,7 +107,7 @@ realize_model:
   micro_batch_size: 1
   seed: 42
   shuffle_seed: 444
-  dataset_path: ${dataset_path}
+  dataset_path: ${dataset_path}/valid
 
 nccl_timeout_minutes: ${timedelta_minutes:10}
 

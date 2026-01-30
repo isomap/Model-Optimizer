@@ -62,6 +62,7 @@ from modelopt.torch.puzzletron.anymodel import convert_model
             "*E",
             True,
         ),
+        ("gpt-oss-20b", "gpt_oss_20b", "gpt-oss-20b", None, True),
     ],
 )
 def test_puzzletron(
@@ -139,14 +140,27 @@ def _test_puzzletron_multiprocess_job(
             assert (puzzle_dir / "ckpts/num_experts_8").exists()
 
             # assertions for the mip_and_realize_models step 6
-            solution_0_ckpt_config_path = (
-                puzzle_dir
-                / "mip/puzzle_solutions/stats_num_local_experts_1472/solutions--checkpoints/solution_0/config.json"
+            # Find the MIP solution directory dynamically (e.g., stats_num_local_experts_*)
+            mip_solutions_dir = puzzle_dir / "mip/puzzle_solutions"
+            solution_dirs = [
+                d
+                for d in mip_solutions_dir.iterdir()
+                if d.is_dir() and d.name.startswith("stats_num_local_experts_")
+            ]
+            assert len(solution_dirs) == 1, (
+                f"Expected exactly one stats_num_local_experts_* directory, found: {[d.name for d in solution_dirs]}"
             )
-            assert solution_0_ckpt_config_path.exists()
-            assert (
-                puzzle_dir / "mip/puzzle_solutions/stats_num_local_experts_1472/solutions.json"
-            ).exists()
+            solution_dir = solution_dirs[0]
+
+            solution_0_ckpt_config_path = (
+                solution_dir / "solutions--checkpoints/solution_0/config.json"
+            )
+            assert solution_0_ckpt_config_path.exists(), (
+                f"Expected {solution_0_ckpt_config_path} to exist"
+            )
+            assert (solution_dir / "solutions.json").exists(), (
+                f"Expected {solution_dir / 'solutions.json'} to exist"
+            )
         else:
             # assertions for the score_pruning_activations step 1 (FFN pruning)
             _assert_score_pruning_activations(puzzle_dir, hf_config_name)
@@ -217,7 +231,7 @@ EXPECTED_LM_LOSS = {
     "nemotron-nano-12b-v2": 4.79390811920166,
     "mistral-small-24b-instruct-2501": 4.709150314331055,
     "qwen3-8b": 4.733874320983887,
-    # Note: nemotron-3-nano-30b-a3b-base-bf16 uses MoE expert pruning with different MIP path
+    # Note: nemotron-3-nano-30b-a3b-base-bf16 and gpt-oss-20b use MoE expert pruning with different MIP path
 }
 
 
