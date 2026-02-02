@@ -16,15 +16,19 @@
 """
 Main script for running the puzzletron algorithm on large language models (based on Puzzle paper https://arxiv.org/abs/2411.19146).
 
-This script provides two modes:
+This script provides three modes:
 1. Default mode: Runs the full puzzletron pipeline
 2. MIP-only mode: Runs only the MIP search and realize models phase
+3. MIP sweep mode: Runs MIP for multiple memory compression rates (enabled via config)
 
 Usage:
     # Full puzzletron pipeline
     torchrun main.py --config ./configs/llama_3.2_1B_pruneffn_memory.yaml
 
     # Only MIP search and realize models phase
+    torchrun main.py --config ./configs/llama_3.2_1B_pruneffn_memory.yaml --mip-only
+
+    # MIP sweep mode (set mip.sweep.enabled: true in config)
     torchrun main.py --config ./configs/llama_3.2_1B_pruneffn_memory.yaml --mip-only
 """
 
@@ -118,6 +122,40 @@ def run_full_puzzletron(hydra_config_path: str):
     mprint("Puzzletron Progress 8/8: puzzletron pipeline completed (multi-gpu)")
 
 
+def run_mip_sweep(hydra_cfg):
+    """Run MIP for multiple memory compression rates and generate CSV with results.
+
+    This function is called when mip.sweep.enabled is True in the config.
+
+    Args:
+        hydra_cfg: Hydra configuration object with mip.sweep settings
+    """
+    mprint("=" * 80)
+    mprint("MIP Sweep Mode Enabled")
+    mprint("=" * 80)
+
+    # Get sweep configuration
+    sweep_cfg = hydra_cfg.mip.sweep
+    compression_rates = sweep_cfg.memory_compression_rates
+    output_csv = sweep_cfg.output_csv
+
+    mprint(f"Compression rates: {compression_rates}")
+    mprint(f"Output CSV: {output_csv}")
+    mprint(f"Puzzle directory: {hydra_cfg.puzzle_dir}")
+
+    # TODO: Implement sweep logic
+    # 1. Load teacher memory from subblock_stats.json
+    # 2. For each compression rate:
+    #    - Calculate target_memory = teacher_memory * rate
+    #    - Run MIP with this target
+    #    - Realize and validate model
+    # 3. Collect all results and generate CSV
+
+    mprint("=" * 80)
+    mprint("MIP sweep functionality will be implemented in next phase")
+    mprint("=" * 80)
+
+
 def run_mip_only(hydra_config_path: str):
     """Run only the MIP search and realize models phase.
 
@@ -143,10 +181,14 @@ def run_mip_only(hydra_config_path: str):
         overrides=[],
     )
 
-    # mip_and_realize_models (distributed processing)
-    # TODO: How to make it part of mnt.search() api, similarly to run_full_puzzletron() API
-    mprint("Puzzletron Progress 7/8: running MIP and realizing models (multi-gpu)")
-    mip_and_realize_models.launch_mip_and_realize_model(hydra_cfg)
+    # Check if sweep mode is enabled
+    if hasattr(hydra_cfg.mip, "sweep") and hydra_cfg.mip.sweep.get("enabled", False):
+        run_mip_sweep(hydra_cfg)
+    else:
+        # mip_and_realize_models (distributed processing)
+        # TODO: How to make it part of mnt.search() api, similarly to run_full_puzzletron() API
+        mprint("Puzzletron Progress 7/8: running MIP and realizing models (multi-gpu)")
+        mip_and_realize_models.launch_mip_and_realize_model(hydra_cfg)
 
     dist.cleanup()
     mprint("Puzzletron Progress 8/8: puzzletron pipeline completed (multi-gpu)")
