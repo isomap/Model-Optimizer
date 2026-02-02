@@ -15,8 +15,10 @@
 
 """Calibration utilities."""
 
+import contextlib
 import math
 import os
+import types
 import warnings
 from functools import partial
 
@@ -1331,6 +1333,98 @@ def blockwise_weight_update(module, h, block_size, percdamp):
     _print_relative_mse_error(quantized_weight, module.weight.float(), h, module.name)
     # Update module weights
     module.weight.data = quantized_weight.reshape(module.weight.shape).to(module.weight.data.dtype)
+
+
+class LayerActivationGettr:
+    """Utility class for collecting layer activations during forward passes.
+
+    This class provides building blocks for sequential layer calibration by:
+    - Patching layers to capture inputs/outputs during forward passes
+    - Supporting early stopping to avoid unnecessary computation
+    """
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+
+    @staticmethod
+    def _patch_layer(layer: torch.nn.Module, stop_after_collection: bool = True):
+        """Patch a layer to collect inputs and outputs during forward passes.
+
+        Args:
+            layer: The layer to patch.
+            stop_after_collection: If True, raise StopIteration after
+                collecting to enable early exit from forward pass.
+        """
+
+        def _custom_forward_w_data_collection(self, *args, **kwargs):
+            """Custom forward that collects inputs and outputs.
+
+            Note: 'self' refers to the patched layer.
+            """
+            assert len(args) >= 1
+            self.inputs.append((args, kwargs))
+            output = self._original_forward(*args, **kwargs)
+            self.outputs.append(output)
+            if getattr(self, "_stop_after_collection", False):
+                raise StopIteration()
+            return output
+
+        layer._original_forward = layer.forward
+        layer.forward = types.MethodType(_custom_forward_w_data_collection, layer)
+        layer.inputs = []
+        layer.outputs = []
+        layer._stop_after_collection = stop_after_collection
+
+    @staticmethod
+    def _unpatch_layer(layer: torch.nn.Module):
+        """Restore a layer's original forward method and clean up."""
+        layer.forward = layer._original_forward
+        del layer._original_forward
+        del layer.inputs
+        del layer.outputs
+        if hasattr(layer, "_stop_after_collection"):
+            del layer._stop_after_collection
+
+    def get_input_activations(self, layer: torch.nn.Module, forward_loop: ForwardLoop) -> list:
+        """Collect input activations for a layer by running the forward loop.
+
+        Patches the layer with early stopping enabled, runs the forward loop,
+        and returns the collected inputs. The forward pass stops immediately
+        after collecting inputs to avoid unnecessary computation.
+
+        Args:
+            layer: The layer to collect inputs for.
+            forward_loop: Callable that runs calibration data through the model.
+
+        Returns:
+            List of (args, kwargs) tuples representing inputs to the layer.
+        """
+        self._patch_layer(layer, stop_after_collection=True)
+        with contextlib.suppress(StopIteration):
+            forward_loop(self.model)
+        inputs = layer.inputs.copy()
+        self._unpatch_layer(layer)
+        return inputs
+
+    def get_output_activations(self, layer: torch.nn.Module, inputs: list) -> list:
+        """Run inputs through layer and collect outputs.
+
+        Patches the layer, forwards each input batch through it,
+        collects outputs, and unpatches the layer.
+
+        Args:
+            layer: The layer to run inputs through.
+            inputs: List of (args, kwargs) tuples - one per batch.
+
+        Returns:
+            List of outputs from the layer - one per batch.
+        """
+        self._patch_layer(layer, stop_after_collection=False)
+        for args, kwargs in inputs:
+            layer(*args, **kwargs)
+        outputs = layer.outputs.copy()
+        self._unpatch_layer(layer)
+        return outputs
 
 
 def gptq_lite(
