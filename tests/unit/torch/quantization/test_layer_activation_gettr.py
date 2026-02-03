@@ -19,7 +19,7 @@ import pytest
 import torch
 from torch import nn
 
-from modelopt.torch.quantization.model_calib import LayerActivationGettr
+from modelopt.torch.quantization.utils import LayerActivationGettr
 
 
 class SimpleModel(nn.Module):
