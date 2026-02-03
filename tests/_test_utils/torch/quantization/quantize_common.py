@@ -75,7 +75,14 @@ def quantize_model_and_forward(model, config, calib_data, compress=False):
     forward_loop(model, run_backward=True)
 
 
-def save_restore_test(model_cls, device, quant_config, compress=False, version=None):
+def save_restore_test(
+    model_cls,
+    device,
+    quant_config,
+    compress=False,
+    version=None,
+    test_cpu_restore: bool = False,
+):
     # test restoring to an unquantized model
     model_quant = model_cls().to(device)
     model_ref = model_cls().to(device)
@@ -93,7 +100,7 @@ def save_restore_test(model_cls, device, quant_config, compress=False, version=N
         # Rest of the tests are not needed for version < 0.29
         return
 
-    if not compress:
+    if test_cpu_restore:
         # gpu: test restoring to a model on cpu. If the quantizer states are not initialized correctly,
         # the buffers will be created on cuda and this test will fail
         model_ref = model_cls().to("cpu")

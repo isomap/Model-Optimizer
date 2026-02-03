@@ -32,9 +32,9 @@ from modelopt.torch.utils.distributed import DistributedProcessGroup, ParallelSt
 from modelopt.torch.utils.network import bind_forward_method, unpatch_forward_method
 from modelopt.torch.utils.perf import get_used_gpu_mem_fraction
 
-from .calib import MseCalibrator
+from .calib import MseCalibrator, NVFP4MSECalibrator
 from .conversion import create_and_replace_svdquant_linear_on_the_fly, set_quantizer_by_cfg_context
-from .nn import QuantModule, SequentialQuantizer, TensorQuantizer
+from .nn import NVFP4StaticQuantizer, QuantModule, SequentialQuantizer, TensorQuantizer
 from .utils import (
     disable_calib,
     enable_fake_quant,
@@ -44,6 +44,7 @@ from .utils import (
     is_quantized_linear,
     is_quantized_row_parallel_linear,
     quantizer_attr_names,
+    reduce_amax,
     weight_attr_names,
 )
 
@@ -264,7 +265,7 @@ def mse_calibrate(
     weight_quantizers = []
     seen_modules = set()
 
-    for name, module in model.named_modules():
+    for name, module in list(model.named_modules()):
         if isinstance(module, TensorQuantizer) and not module._disabled:
             if module._calibrator is not None and not module._dynamic and hasattr(module, "_amax"):
                 # Get the initial amax from max calibration
@@ -276,6 +277,24 @@ def mse_calibrate(
                     and module._block_sizes is not None
                     and module._block_sizes.get("scale_bits") == (4, 3)
                 )
+
+                if is_nvfp4_static:
+                    # Compute and set global_amax
+                    global_amax = reduce_amax(initial_amax, axis=None)
+
+                    # Convert to NVFP4StaticQuantizer in-place
+                    NVFP4StaticQuantizer.from_tensor_quantizer(module, global_amax=global_amax)
+
+                if fp8_scale_sweep and is_nvfp4_static:
+                    # Replace calibrator with NVFP4MSECalibrator
+                    module._calibrator = NVFP4MSECalibrator(
+                        amax=initial_amax,
+                        axis=module._calibrator._axis,
+                        global_amax=module.global_amax,
+                        quant_func=partial(_mse_quant_func, quantizer=module),
+                    )
+                    continue
+
                 if fp8_scale_sweep and not is_nvfp4_static:
                     warnings.warn(
                         f"fp8_scale_sweep is enabled but quantizer '{name}' is not NVFP4 static "
@@ -290,7 +309,6 @@ def mse_calibrate(
                     start_multiplier=start_multiplier,
                     stop_multiplier=stop_multiplier,
                     quant_func=partial(_mse_quant_func, quantizer=module),
-                    fp8_scale_sweep=fp8_scale_sweep and is_nvfp4_static,
                 )
 
     # Identify weight quantizers by checking if they have corresponding weight parameters
