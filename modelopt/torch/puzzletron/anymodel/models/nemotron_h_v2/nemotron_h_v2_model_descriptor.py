@@ -123,10 +123,6 @@ class NemotronHV2ModelDescriptor(ModelDescriptor):
         """
         pass
 
-    @staticmethod
-    def layer_block_name(index: int):
-        return f"backbone.layers.{index}"
-
     @classmethod
     def layer_structure(cls) -> Dict[str, Any]:
         """Define Nemotron-H v2 model structure using class-based approach.

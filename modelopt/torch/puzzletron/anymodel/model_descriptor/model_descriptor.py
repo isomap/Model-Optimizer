@@ -159,11 +159,19 @@ class ModelDescriptor(ABC):
         # Auto-infer from final_norm (remove .weight suffix if present)
         return final_norm[:-7] if final_norm.endswith(".weight") else final_norm
 
-    @staticmethod
-    @abstractmethod
-    def layer_block_name(index: int):
-        """Return the name of the decoder layer at the given index."""
-        raise NotImplementedError
+    @classmethod
+    def layer_block_name(cls, index: int):
+        """Return the name of the decoder layer at the given index.
+
+        Auto-infers from layer_structure().layer_pattern.
+        Override this method only if auto-inference is insufficient.
+
+        Returns:
+            Layer name (e.g., "model.layers.0")
+        """
+        structure = cls.layer_structure()
+        pattern = structure["layer_pattern"]
+        return pattern.replace("{layer_idx}", str(index))
 
     @classmethod
     def layer_structure(cls) -> Dict[str, Any]:

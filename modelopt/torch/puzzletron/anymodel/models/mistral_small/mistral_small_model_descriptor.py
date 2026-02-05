@@ -67,10 +67,6 @@ class MistralSmallModelDescriptor(ModelDescriptor):
     def init_rotary_embedding(model: MistralForCausalLM, runtime):
         model.model.rotary_emb = MistralRotaryEmbedding(model.config, runtime.device)
 
-    @staticmethod
-    def layer_block_name(index: int):
-        return f"model.layers.{index}"
-
     @classmethod
     def layer_structure(cls) -> Dict[str, Any]:
         """Define Mistral model structure using class-based approach."""

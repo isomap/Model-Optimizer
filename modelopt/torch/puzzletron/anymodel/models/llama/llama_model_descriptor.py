@@ -70,10 +70,6 @@ class LlamaModelDescriptor(ModelDescriptor):
     def init_rotary_embedding(model: LlamaForCausalLM, runtime):
         model.model.rotary_emb = LlamaRotaryEmbedding(model.config, runtime.device)
 
-    @staticmethod
-    def layer_block_name(index: int):
-        return f"model.layers.{index}"
-
     @classmethod
     def layer_structure(cls) -> Dict[str, Any]:
         """Define Llama model structure using class-based approach."""
