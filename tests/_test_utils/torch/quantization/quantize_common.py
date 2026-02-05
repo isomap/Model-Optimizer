@@ -96,6 +96,15 @@ def save_restore_test(
     model_ref.load_state_dict(model_quant.state_dict())
     assert torch.allclose(model_quant(calib_data[0]), model_ref(calib_data[0]))
 
+    # Verify that TensorQuantizer subclass types are preserved after restore
+    for name_q, mod_q in model_quant.named_modules():
+        if name_q.endswith("quantizer"):
+            mod_r = dict(model_ref.named_modules())[name_q]
+            assert type(mod_q) is type(mod_r), (
+                f"Quantizer class mismatch for '{name_q}': "
+                f"expected {type(mod_q).__name__}, got {type(mod_r).__name__}"
+            )
+
     if version is not None and Version(version) < Version("0.29"):
         # Rest of the tests are not needed for version < 0.29
         return
