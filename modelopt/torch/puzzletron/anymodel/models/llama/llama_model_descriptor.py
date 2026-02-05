@@ -71,18 +71,6 @@ class LlamaModelDescriptor(ModelDescriptor):
         model.model.rotary_emb = LlamaRotaryEmbedding(model.config, runtime.device)
 
     @staticmethod
-    def input_embedding_name():
-        return "model.embed_tokens"
-
-    @staticmethod
-    def output_embedding_name():
-        return "lm_head"
-
-    @staticmethod
-    def final_norm_name():
-        return "model.norm"
-
-    @staticmethod
     def layer_block_name(index: int):
         return f"model.layers.{index}"
 
@@ -100,8 +88,9 @@ class LlamaModelDescriptor(ModelDescriptor):
                 "include_by_name": ["post_attention_layernorm.weight"],
             },
             "global_modules": {
-                "embeddings": ["model.embed_tokens.weight"],
-                "lm_head": ["model.norm.weight", "lm_head.weight"],
+                "embeddings": "model.embed_tokens.weight",
+                "lm_head": "lm_head.weight",
+                "final_norm": "model.norm.weight",
             },
         }
 

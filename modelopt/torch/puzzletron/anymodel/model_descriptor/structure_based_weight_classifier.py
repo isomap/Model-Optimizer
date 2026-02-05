@@ -299,29 +299,33 @@ class StructureBasedWeightClassifier:
         Args:
             weight_name: Weight name (e.g., "model.embed_tokens.weight")
             global_modules: global_modules dict from layer_structure()
+                Keys: "embeddings", "lm_head", "final_norm" (all strings)
 
         Returns:
             'embeddings', 'lm_head', or None
+            Note: "final_norm" weights are mapped to "lm_head" group
         """
-        # Get embeddings and lm_head paths (both must be lists)
-        embeddings_paths = global_modules.get("embeddings", [])
-        lm_head_paths = global_modules.get("lm_head", [])
+        embeddings_path = global_modules.get("embeddings")
+        lm_head_path = global_modules.get("lm_head")
+        final_norm_path = global_modules.get("final_norm")
 
         # Check for duplicates
-        duplicates = set(embeddings_paths) & set(lm_head_paths)
-        if duplicates:
+        paths = [p for p in [embeddings_path, lm_head_path, final_norm_path] if p]
+        if len(paths) != len(set(paths)):
+            duplicates = [p for p in paths if paths.count(p) > 1]
             raise ValueError(
-                f"Weight(s) appear in both embeddings and lm_head in global_modules: {duplicates}"
+                f"Weight(s) appear in multiple groups in global_modules: {set(duplicates)}"
             )
 
-        # Check embeddings (exact match only)
-        for path in embeddings_paths:
-            if weight_name == path:
-                return "embeddings"
+        # Exact match only
+        if weight_name == embeddings_path:
+            return "embeddings"
 
-        # Check lm_head (exact match only)
-        for path in lm_head_paths:
-            if weight_name == path:
-                return "lm_head"
+        if weight_name == lm_head_path:
+            return "lm_head"
+
+        # final_norm maps to lm_head group for checkpointing
+        if weight_name == final_norm_path:
+            return "lm_head"
 
         return None

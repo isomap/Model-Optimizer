@@ -108,23 +108,56 @@ class ModelDescriptor(ABC):
         """
         raise NotImplementedError
 
-    @staticmethod
-    @abstractmethod
-    def input_embedding_name():
-        """Return the name of the input embedding layer."""
-        raise NotImplementedError
+    @classmethod
+    def input_embedding_name(cls):
+        """Return the name of the input embedding layer.
 
-    @staticmethod
-    @abstractmethod
-    def output_embedding_name():
-        """Return the name of the output embedding layer."""
-        raise NotImplementedError
+        Auto-infers from layer_structure().global_modules.embeddings.
+        Override this method only if auto-inference is insufficient.
 
-    @staticmethod
-    @abstractmethod
-    def final_norm_name():
-        """Return the name of the final normalization layer."""
-        raise NotImplementedError
+        Returns:
+            Module name (e.g., "model.embed_tokens")
+        """
+
+        structure = cls.layer_structure()
+        embeddings = structure["global_modules"].get("embeddings")
+
+        # Auto-infer from embeddings (remove .weight suffix if present)
+        return embeddings[:-7] if embeddings.endswith(".weight") else embeddings
+
+    @classmethod
+    def output_embedding_name(cls):
+        """Return the name of the output embedding layer.
+
+        Auto-infers from layer_structure().global_modules.lm_head.
+        Override this method only if auto-inference is insufficient.
+
+        Returns:
+            Module name (e.g., "lm_head")
+        """
+
+        structure = cls.layer_structure()
+        lm_head = structure["global_modules"].get("lm_head")
+
+        # Auto-infer from lm_head (remove .weight suffix if present)
+        return lm_head[:-7] if lm_head.endswith(".weight") else lm_head
+
+    @classmethod
+    def final_norm_name(cls):
+        """Return the name of the final normalization layer.
+
+        Auto-infers from layer_structure().global_modules.final_norm.
+        Override this method only if auto-inference is insufficient.
+
+        Returns:
+            Module name (e.g., "model.norm")
+        """
+
+        structure = cls.layer_structure()
+        final_norm = structure["global_modules"].get("final_norm")
+
+        # Auto-infer from final_norm (remove .weight suffix if present)
+        return final_norm[:-7] if final_norm.endswith(".weight") else final_norm
 
     @staticmethod
     @abstractmethod
@@ -133,14 +166,13 @@ class ModelDescriptor(ABC):
         raise NotImplementedError
 
     @classmethod
-    def layer_structure(cls) -> Optional[Dict[str, Any]]:
+    def layer_structure(cls) -> Dict[str, Any]:
         """Define model structure for class-based weight classification.
 
-        Override this method to use the new structure-based approach instead of
-        regex-based layer_name_predicates().
+        Override this method to use the new structure-based approach.
 
         Returns:
-            Dictionary defining model structure, or None to use layer_name_predicates().
+            Dictionary defining model structure.
 
         Example for Llama:
             >>> {
@@ -154,8 +186,9 @@ class ModelDescriptor(ABC):
             ...         "include_by_name": ["post_attention_layernorm.weight"],
             ...     },
             ...     "global_modules": {
-            ...         "embeddings": ["model.embed_tokens.weight"],
-            ...         "lm_head": ["model.norm.weight", "lm_head.weight"],
+            ...         "embeddings": "model.embed_tokens.weight",
+            ...         "lm_head": "lm_head.weight",
+            ...         "final_norm": "model.norm.weight",
             ...     },
             ... }
 
@@ -164,11 +197,12 @@ class ModelDescriptor(ABC):
             - attention/ffn: Subblock definitions
               - module_classes: List of module class names (strings) to classify
               - include_by_name: List of full weight names to include (e.g., "norm.weight")
-            - global_modules: Non-layer weights
-              - embeddings: List of full weight names for embeddings
-              - lm_head: List of full weight names for output head
+            - global_modules: Non-layer weights (strings)
+              - embeddings: Weight name for embeddings
+              - lm_head: Weight name for output head
+              - final_norm: Weight name for final norm (saved with lm_head)
         """
-        return None
+        raise NotImplementedError(f"{cls.__name__} must implement layer_structure()")
 
     @staticmethod
     @abstractmethod
@@ -223,17 +257,16 @@ class ModelDescriptor(ABC):
         cls,
         layer_names: Iterable[str],
         num_hidden_layers: int,
-        model: Optional[nn.Module] = None,
+        model: nn.Module,
     ) -> Dict[str, List[str]]:
         """Group model weights to support the puzzle subblock checkpointing format.
 
-        This method uses layer_structure() if implemented, otherwise falls back to
-        layer_name_predicates() for backwards compatibility.
+        This method uses layer_structure() for class-based weight classification.
 
         Args:
             layer_names: state_dict layer names of the model.
             num_hidden_layers: number of decoder layers in the model.
-            model: Model loaded with device_map="meta" (required if using layer_structure())
+            model: Model loaded with device_map="meta" (required)
 
         Returns:
             Dictionary of group names to list of layer names per group, e.g.:
@@ -244,40 +277,14 @@ class ModelDescriptor(ABC):
             ...     "block_0_attention": ["model.layers.0.self_attn.q_proj", ...],
             ... }
         """
-        # Try new approach first
+        # Use class-based classification with model inspection
         structure = cls.layer_structure()
 
-        if structure is not None:
-            # Use class-based classification with model inspection
-            if model is None:
-                raise ValueError(
-                    f"{cls.__name__} uses layer_structure() which requires model parameter"
-                )
-
-            # Delegate to StructureBasedWeightClassifier
-
-            return StructureBasedWeightClassifier.classify_weights(
-                model=model,
-                structure=structure,
-                weight_names=layer_names,
-                num_hidden_layers=num_hidden_layers,
-                descriptor_class_name=cls.__name__,
-            )
-        else:
-            # Fall back to old regex-based approach
-            return cls._get_weight_groups_from_predicates(layer_names, num_hidden_layers)
-
-    @classmethod
-    def _get_weight_groups_from_predicates(
-        cls, layer_names: Iterable[str], num_hidden_layers: int
-    ) -> Dict[str, List[str]]:
-        """Group weights using layer_name_predicates()"""
-        weight_groups = defaultdict(list)
-        for name in layer_names:
-            for group, pattern in cls.layer_name_predicates(num_hidden_layers).items():
-                if pattern.match(name):
-                    weight_groups[group].append(name)
-                    break
-            else:
-                raise ValueError(f"Couldn't find a match for {name}")
-        return weight_groups
+        # Delegate to StructureBasedWeightClassifier
+        return StructureBasedWeightClassifier.classify_weights(
+            model=model,
+            structure=structure,
+            weight_names=layer_names,
+            num_hidden_layers=num_hidden_layers,
+            descriptor_class_name=cls.__name__,
+        )

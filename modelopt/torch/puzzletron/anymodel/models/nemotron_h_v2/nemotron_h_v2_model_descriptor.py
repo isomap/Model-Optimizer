@@ -124,18 +124,6 @@ class NemotronHV2ModelDescriptor(ModelDescriptor):
         pass
 
     @staticmethod
-    def input_embedding_name():
-        return "backbone.embeddings"
-
-    @staticmethod
-    def output_embedding_name():
-        return "lm_head"
-
-    @staticmethod
-    def final_norm_name():
-        return "backbone.norm_f"
-
-    @staticmethod
     def layer_block_name(index: int):
         return f"backbone.layers.{index}"
 
@@ -163,8 +151,9 @@ class NemotronHV2ModelDescriptor(ModelDescriptor):
                 "include_by_name": ["norm.weight"],  # Shared norm, assigned per-layer
             },
             "global_modules": {
-                "embeddings": ["backbone.embeddings.weight"],
-                "lm_head": ["backbone.norm_f.weight", "lm_head.weight"],
+                "embeddings": "backbone.embeddings.weight",
+                "lm_head": "lm_head.weight",
+                "final_norm": "backbone.norm_f.weight",
             },
         }
 
