@@ -388,51 +388,7 @@ NVFP4_DEFAULT_CFG = {
     "algorithm": "max",
 }
 
-NVFP4_WEIGHT_ACT_MSE_CFG = {
-    "quant_cfg": {
-        "*weight_quantizer": {
-            "num_bits": (2, 1),
-            "block_sizes": {-1: 16, "type": "static", "scale_bits": (4, 3)},
-            "axis": None,
-            "enable": True,
-        },
-        "*input_quantizer": {
-            "num_bits": (2, 1),
-            "block_sizes": {-1: 16, "type": "dynamic", "scale_bits": (4, 3)},
-            "axis": None,
-            "enable": True,
-        },
-        **_default_disabled_quantizer_cfg,
-    },
-    "algorithm": {
-        "method": "mse",
-        "step_size": 0.25,
-        "start_multiplier": 0.25,
-        "stop_multiplier": 2.0,
-    },
-}
-
-NVFP4_WEIGHT_MSE_FP8_SWEEP_CFG = {
-    "quant_cfg": {
-        "*weight_quantizer": {
-            "num_bits": (2, 1),
-            "block_sizes": {-1: 16, "type": "static", "scale_bits": (4, 3)},
-            "axis": None,
-            "enable": True,
-        },
-        "*input_quantizer": {
-            "enable": False,
-        },
-        **_default_disabled_quantizer_cfg,
-    },
-    "algorithm": {
-        "method": "mse",
-        "fp8_scale_sweep": True,
-    },
-}
-
-
-NVFP4_LOCAL_HESSIAN_CFG = {
+NVFP4_LOCAL_HESSIAN_WEIGHT_ONLY_CFG = {
     "quant_cfg": {
         "*weight_quantizer": {
             "num_bits": (2, 1),
@@ -1133,9 +1089,6 @@ class LocalHessianCalibConfig(QuantizeAlgorithmConfig):
     The local Hessian loss for each block is: ``(dw @ H @ dw.T)`` where:
     - ``dw = weight - quantized_weight`` (weight reconstruction error per block)
     - ``H = X @ X.T`` is the local Hessian computed from input activations X
-
-    This method is particularly effective for NVFP4 weight-only quantization where
-    activation information helps select better per-block scales.
 
     """
 
