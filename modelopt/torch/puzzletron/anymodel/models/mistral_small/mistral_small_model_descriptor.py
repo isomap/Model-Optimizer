@@ -16,7 +16,7 @@
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from transformers.models.mistral.modeling_mistral import (
     MistralDecoderLayer,
@@ -68,53 +68,28 @@ class MistralSmallModelDescriptor(ModelDescriptor):
         model.model.rotary_emb = MistralRotaryEmbedding(model.config, runtime.device)
 
     @staticmethod
-    def input_embedding_name():
-        return "model.embed_tokens"
-
-    @staticmethod
-    def output_embedding_name():
-        return "lm_head"
-
-    @staticmethod
-    def final_norm_name():
-        return "model.norm"
-
-    @staticmethod
     def layer_block_name(index: int):
         return f"model.layers.{index}"
 
-    @staticmethod
-    def layer_name_predicates(num_layers: int) -> Dict[str, re.Pattern]:
-        layer_name_patterns = {
-            "embeddings": re.compile(r"^model\.embed_tokens\.weight$"),
-            "lm_head": re.compile(r"^(model\.norm\.weight|lm_head\.weight)$"),
+    @classmethod
+    def layer_structure(cls) -> Dict[str, Any]:
+        """Define Mistral model structure using class-based approach."""
+        return {
+            "layer_pattern": "model.layers.{layer_idx}",
+            "attention": {
+                "module_classes": ["MistralAttention"],
+                "include_by_name": ["input_layernorm.weight"],
+            },
+            "ffn": {
+                "module_classes": ["MistralMLP"],
+                "include_by_name": ["post_attention_layernorm.weight"],
+            },
+            "global_modules": {
+                "embeddings": "model.embed_tokens.weight",
+                "lm_head": "lm_head.weight",
+                "final_norm": "model.norm.weight",
+            },
         }
-
-        def build_ffn_predicates() -> Dict[str, re.Pattern]:
-            return {
-                f"block_{layer_idx}_ffn": re.compile(
-                    rf"^model\.layers\.{layer_idx}\.(post_attention_layernorm\.weight"
-                    r"|mlp\.up_proj\.weight"
-                    r"|mlp\.gate_proj\.weight"
-                    r"|mlp\.down_proj\.weight)$"
-                )
-                for layer_idx in range(num_layers)
-            }
-
-        def build_attention_predicates() -> Dict[str, re.Pattern]:
-            return {
-                f"block_{layer_idx}_attention": re.compile(
-                    rf"^model\.layers\.{layer_idx}\.(input_layernorm\.weight"
-                    r"|self_attn\.q_proj\.weight"
-                    r"|self_attn\.k_proj\.weight"
-                    r"|self_attn\.v_proj\.weight"
-                    r"|self_attn\.o_proj\.weight)$"
-                )
-                for layer_idx in range(num_layers)
-            }
-
-        layer_name_patterns.update(**build_ffn_predicates(), **build_attention_predicates())
-        return layer_name_patterns
 
 
 @dataclass

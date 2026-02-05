@@ -94,39 +94,6 @@ class LlamaModelDescriptor(ModelDescriptor):
             },
         }
 
-    @staticmethod
-    def layer_name_predicates(num_layers: int) -> Dict[str, re.Pattern]:
-        layer_name_patterns = {
-            "embeddings": re.compile(r"^model\.embed_tokens\.weight$"),
-            "lm_head": re.compile(r"^(model\.norm\.weight|lm_head\.weight)$"),
-        }
-
-        def build_ffn_predicates() -> Dict[str, re.Pattern]:
-            return {
-                f"block_{layer_idx}_ffn": re.compile(
-                    rf"^model\.layers\.{layer_idx}\.(post_attention_layernorm\.weight"
-                    r"|mlp\.up_proj\.weight"
-                    r"|mlp\.gate_proj\.weight"
-                    r"|mlp\.down_proj\.weight)$"
-                )
-                for layer_idx in range(num_layers)
-            }
-
-        def build_attention_predicates() -> Dict[str, re.Pattern]:
-            return {
-                f"block_{layer_idx}_attention": re.compile(
-                    rf"^model\.layers\.{layer_idx}\.(input_layernorm\.weight"
-                    r"|self_attn\.q_proj\.weight"
-                    r"|self_attn\.k_proj\.weight"
-                    r"|self_attn\.v_proj\.weight"
-                    r"|self_attn\.o_proj\.weight)$"
-                )
-                for layer_idx in range(num_layers)
-            }
-
-        layer_name_patterns.update(**build_ffn_predicates(), **build_attention_predicates())
-        return layer_name_patterns
-
 
 @dataclass
 class LlamaFFNIntermediateLayerDescriptor(FFNIntermediateLayerDescriptor):
