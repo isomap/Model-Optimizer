@@ -212,7 +212,29 @@ class TestNVFP4MSECalibrator:
         assert amax[2] > amax[1]
         assert amax[3] > amax[2]
 
-        # Test that fp8 sweep generates quantized scales
+    def test_fp8_sweep_generates_quantized_scales(self, device):
+        """Test that the fp8 sweep produces scales that are already FP8-quantized."""
+        num_blocks = 8
+        block_size = 16
+
+        x = torch.randn(num_blocks, block_size, device=device)
+        per_block_amax = x.abs().amax(dim=-1)
+        global_amax = per_block_amax.max()
+
+        def quant_func(x, amax):
+            return static_blockwise_fp4_fake_quant(x, amax, global_amax)
+
+        cal = NVFP4MSECalibrator(
+            amax=per_block_amax,
+            global_amax=global_amax,
+            quant_func=quant_func,
+        )
+
+        cal.collect(x)
+        amax = cal.compute_amax()
+
+        # The calibrator sweeps over FP8 candidates, so the resulting scales
+        # should already be representable in FP8 (i.e., quantize-dequantize is a no-op).
         scale = amax.float() / 6.0
         scale_fp8_quant_amax = global_amax.float() / 6.0
         scale_qdq = scaled_e4m3_impl(scale, scale_fp8_quant_amax)

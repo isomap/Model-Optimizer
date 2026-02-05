@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MSE-based calibrators for quantization."""
+"""Calibrator that returns the MSE amax of all collected tensors."""
 
 import math
 from collections.abc import Callable
@@ -28,7 +28,7 @@ __all__ = ["MseCalibrator", "NVFP4MSECalibrator"]
 
 
 class MseCalibrator(_Calibrator):
-    """MSE amax search that minimizes error between x and quantized x."""
+    """Per-tensor and per-channel MSE amax search that minimizes error between x and quantized x."""
 
     def __init__(
         self,
@@ -40,7 +40,20 @@ class MseCalibrator(_Calibrator):
         quant_func: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
         error_func: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ):
-        """Initialize MSE calibrator with initial amax and search parameters."""
+        """Initialize MSE calibrator.
+
+        Args:
+            amax: Initial amax value (required).
+            axis: Quantization axis. None means per-tensor quantization.
+            step_size: Step size for amax search. The number of steps is computed as
+                        ceil((stop_multiplier - start_multiplier) / step_size) + 1.
+            start_multiplier: Starting multiplier for amax search.
+            stop_multiplier: Ending multiplier for amax search.
+            quant_func: Function that quantizes input tensor given an amax value.
+                        Should have signature: quant_func(x, amax) -> quantized_x.
+            error_func: Function to compute error between x and xq.
+                        Default is F.mse_loss(x, xq, reduction='none').
+        """
         super().__init__(num_bits=None, axis=axis, unsigned=None)
         self._initial_amax = amax
         self._step_size = step_size
@@ -68,7 +81,11 @@ class MseCalibrator(_Calibrator):
 
     @torch.no_grad()
     def collect(self, x: torch.Tensor):
-        """Collect tensor statistics for MSE calibration."""
+        """Collect input tensor statistics and compute losses for MSE calibration.
+
+        Args:
+            x: Input tensor.
+        """
         if self._quant_func is None:
             raise RuntimeError("Quantization function not set.")
 
@@ -101,13 +118,16 @@ class MseCalibrator(_Calibrator):
                 self._losses_sum[step] += loss
 
     def reset(self):
-        """Reset collected statistics."""
+        """Reset the stored losses and amax value."""
         self._losses_sum = None
         self._candidates = None
         self._amax = None
 
     def clear(self):
-        """Clear all state including initial amax."""
+        """Clear all cached data to free GPU memory.
+
+        Call this after compute_amax() and load_calib_amax() are done.
+        """
         self._losses_sum = None
         self._candidates = None
         if self._initial_amax is not None:
@@ -116,7 +136,11 @@ class MseCalibrator(_Calibrator):
 
     @torch.no_grad()
     def compute_amax(self, verbose: bool = False):
-        """Compute optimal amax from collected statistics."""
+        """Return the amax value that minimizes quantization error.
+
+        Args:
+            verbose: If True, print the ratio of best_amax to initial_amax.
+        """
         if self._losses_sum is None or not any(loss is not None for loss in self._losses_sum):
             return None
 
