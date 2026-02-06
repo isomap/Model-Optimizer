@@ -50,7 +50,7 @@ torchrun --nproc_per_node 2 /opt/Megatron-Bridge/3rdparty/Model-Optimizer/exampl
 To see the full usage for advanced configurations, run:
 
 ```bash
-python /opt/Megatron-Bridge/3rdparty/Model-Optimizer/examples/megatron_bridge/prune_minitron.py --help
+torchrun --nproc_per_node 1 /opt/Megatron-Bridge/3rdparty/Model-Optimizer/examples/megatron_bridge/prune_minitron.py --help
 ```
 
 > [!TIP]
@@ -60,7 +60,7 @@ python /opt/Megatron-Bridge/3rdparty/Model-Optimizer/examples/megatron_bridge/pr
 
 ## Distillation
 
-TODO
+TODO - Add info!
 
 ## Quantization
 
