@@ -72,7 +72,6 @@ If you want to tokenize your own data for a specific tokenizer, you can use the 
         max_sequence_length=256000,
     )
 """
-# TODO: Fix resuming distillation from an intermediate checkpoint.
 
 import argparse
 import os
@@ -278,7 +277,6 @@ def main(args: argparse.Namespace):
             ckpt_format="torch_dist",
             async_save=True,
             fully_parallel_save=True,
-            finetune=True,
         ),
         rng=RNGConfig(seed=SEED),
         mixed_precision="bf16_mixed",
