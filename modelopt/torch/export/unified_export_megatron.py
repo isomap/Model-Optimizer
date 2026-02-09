@@ -20,7 +20,6 @@
 
 import json
 import os
-import shutil
 import tempfile
 from collections import OrderedDict
 from pathlib import Path
@@ -28,9 +27,8 @@ from typing import Any
 
 import torch
 import torch.distributed
-from huggingface_hub import hf_hub_download, snapshot_download
-from safetensors.torch import safe_open, save_file
-from tqdm import tqdm
+from huggingface_hub import hf_hub_download
+from safetensors.torch import save_file
 
 from modelopt import __version__
 from modelopt.torch.utils import import_plugin
@@ -45,6 +43,7 @@ from .model_config import (
     QUANTIZATION_NONE,
     QUANTIZATION_NVFP4,
 )
+from .plugins.hf_checkpoint_utils import copy_remote_code, load_multimodal_components
 from .plugins.mcore_common import all_mcore_hf_export_mapping
 from .plugins.mcore_custom import CustomModuleMapping, get_safetensor, save_safetensors
 from .plugins.megatron_importer import GPTModelImporter
@@ -221,10 +220,29 @@ class GPTModelExporter:
 
                     self._hf_extra_config.update(eagle_config_update)
 
+    def save_pretrained_extra_modules(
+        self,
+        save_directory: str | os.PathLike,
+    ):
+        """Save a EAGLE or Medusa checkpoints which can be deployed by vLLM and TensorRT-LLM."""
+        # We use the last PP rank to write the config because
+        # medusa_heads and eagle_module only exist in the last stage.
+        pp_rank = get_pipeline_model_parallel_rank()
+        pp_size = get_pipeline_model_parallel_world_size()
+        is_last_stage_main_rank = pp_rank == pp_size - 1
+
+        state_dict = self.extra_state_dict
+
+        if is_last_stage_main_rank and self._hf_extra_config is not None:
+            self._hf_extra_config.save_pretrained(save_directory)
+            save_file(state_dict, save_directory + "/model.safetensors", metadata={"format": "pt"})
+
+        torch.distributed.barrier()
+
     def save_pretrained(
         self,
         save_directory: str | os.PathLike,
-        pretrained_model_name_or_path: str | os.PathLike | None = None,
+        pretrained_model_name_or_path: str | os.PathLike,
     ):
         """Save a unified checkpoint which can be deployed by vLLM and TensorRT-LLM.
 
@@ -242,7 +260,7 @@ class GPTModelExporter:
         is_last_stage_main_rank = pp_rank == pp_size - 1
 
         # Main export process
-        state_dict = self.extra_state_dict if self.export_extra_modules else self.state_dict
+        state_dict = self.state_dict
 
         quantization_format = self._get_quantization_format(self.model)
         quantization = None
@@ -259,35 +277,32 @@ class GPTModelExporter:
         # We use the last PP rank and the 1st EP rank to write the config because
         # medusa_heads and eagle_module only exist in the last stage.
         if is_last_stage_main_rank:
-            if self.export_extra_modules and self._hf_extra_config is not None:
-                self._hf_extra_config.save_pretrained(save_directory)
-            else:
-                self._hf_config.save_pretrained(save_directory)
-                try:
-                    generation_config = transformers.GenerationConfig.from_pretrained(
-                        self._hf_pretrained_model_name
-                    )
-                    generation_config.save_pretrained(save_directory)
-                except OSError:
-                    pass
-                try:
-                    tokenizer = transformers.AutoTokenizer.from_pretrained(
-                        self._hf_pretrained_model_name
-                    )
-                    tokenizer.save_pretrained(save_directory)
-                except OSError:
-                    pass
-                except TypeError:
-                    pass
-                try:
-                    # Load and save preprocessor config from the original model
-                    processor = AutoProcessor.from_pretrained(
-                        self._hf_pretrained_model_name, trust_remote_code=self.trust_remote_code
-                    )
-                    if hasattr(processor, "image_processor"):
-                        processor.image_processor.save_pretrained(save_directory)
-                except (OSError, ValueError, ImportError):
-                    pass
+            self._hf_config.save_pretrained(save_directory)
+            try:
+                generation_config = transformers.GenerationConfig.from_pretrained(
+                    self._hf_pretrained_model_name
+                )
+                generation_config.save_pretrained(save_directory)
+            except OSError:
+                pass
+            try:
+                tokenizer = transformers.AutoTokenizer.from_pretrained(
+                    self._hf_pretrained_model_name
+                )
+                tokenizer.save_pretrained(save_directory)
+            except OSError:
+                pass
+            except TypeError:
+                pass
+            try:
+                # Load and save preprocessor config from the original model
+                processor = AutoProcessor.from_pretrained(
+                    self._hf_pretrained_model_name, trust_remote_code=self.trust_remote_code
+                )
+                if hasattr(processor, "image_processor"):
+                    processor.image_processor.save_pretrained(save_directory)
+            except (OSError, ValueError, ImportError):
+                pass
 
             mtp_state_dict = self._get_mtp_state_dict()
             if len(mtp_state_dict) > 0:
@@ -314,121 +329,18 @@ class GPTModelExporter:
             with open(save_directory + "/hf_quant_config.json", "w") as f:
                 json.dump(self._hf_quant_config, f, indent=4)
 
-        if (
-            is_first_stage_main_rank
-            and self.is_multimodal
-            and pretrained_model_name_or_path is not None
-        ):
-            hf_checkpoint_path = Path(pretrained_model_name_or_path)
-            if not hf_checkpoint_path.is_dir():
-                hf_checkpoint_path = tempfile.gettempdir() + "/" + pretrained_model_name_or_path
-                if not Path(hf_checkpoint_path).exists():
-                    snapshot_download(
-                        repo_id=pretrained_model_name_or_path,
-                        local_dir=hf_checkpoint_path,
-                    )
-
-            safetensors_file = Path(hf_checkpoint_path) / "model.safetensors"
-            safetensors_index_file = Path(hf_checkpoint_path) / "model.safetensors.index.json"
-
-            multimodal_state_dict = {}
-
-            if safetensors_file.is_file():
-                print(f"Loading multimodal components from single file: {safetensors_file}")
-                with safe_open(safetensors_file, framework="pt") as f:
-                    multimodal_keys = [
-                        key
-                        for key in f.keys()  # noqa: SIM118
-                        if key.startswith(("multi_modal_projector", "vision_model"))
-                    ]
-                    for key in tqdm(multimodal_keys, desc="Loading multimodal tensors"):
-                        multimodal_state_dict[key] = f.get_tensor(key)
-
-            elif safetensors_index_file.is_file():
-                print(f"Loading multimodal components from sharded model: {hf_checkpoint_path}")
-                with open(safetensors_index_file) as f:
-                    safetensors_index = json.load(f)
-
-                # For multimodal models, vision_model and multi_modal_projector are in the first shard
-                all_shard_files = sorted(set(safetensors_index["weight_map"].values()))
-                first_shard_file = all_shard_files[0]  # e.g., "model-00001-of-00050.safetensors"
-
-                # Load multimodal components from the first shard file
-                safetensors_filepath = Path(hf_checkpoint_path) / first_shard_file
-                print(f"Loading multimodal components from {first_shard_file}")
-
-                with safe_open(safetensors_filepath, framework="pt") as f:
-                    shard_keys = list(f.keys())
-                    multimodal_keys_in_shard = [
-                        k
-                        for k in shard_keys
-                        if k.startswith(("multi_modal_projector", "vision_model"))
-                    ]
-
-                    if multimodal_keys_in_shard:
-                        print(
-                            f"Found {len(multimodal_keys_in_shard)} multimodal tensors in {first_shard_file}"
-                        )
-                        for key in tqdm(
-                            multimodal_keys_in_shard, desc="Loading multimodal tensors"
-                        ):
-                            multimodal_state_dict[key] = f.get_tensor(key)
-                    else:
-                        print(f"No multimodal components found in {first_shard_file}")
-
-            else:
-                print(f"Warning: No safetensors files found in {hf_checkpoint_path}")
-
-            print(f"Successfully loaded {len(multimodal_state_dict)} multimodal tensors")
-            # Add multimodal components to state_dict
+        # Add multimodal components to state_dict. Since only support decoder model quantization,
+        # no changes will be made to the multimodal components. We copy the multimodal components
+        # from the pretrained model directly to the state_dict to avoid implementing the export logic.
+        if is_first_stage_main_rank and self.is_multimodal:
+            multimodal_state_dict = load_multimodal_components(pretrained_model_name_or_path)
             state_dict.update(multimodal_state_dict)
 
         # Barrier to ensure the export_dir has been created.
         torch.distributed.barrier()
 
-        if self.export_extra_modules:
-            if is_last_stage_main_rank:
-                save_file(
-                    state_dict, save_directory + "/model.safetensors", metadata={"format": "pt"}
-                )
-            torch.distributed.barrier()
-            return
-
-        if (
-            is_last_stage_main_rank
-            and self._hf_config is not None
-            and pretrained_model_name_or_path is not None
-        ):
-            # For models that keep configuration and modeling files as part of the checkpoint,
-            # we need to copy them to the export directory for seamless integration with inference
-            # frameworks.
-            hf_checkpoint_path = Path(pretrained_model_name_or_path)
-            model_type = getattr(self._hf_config, "model_type", None)
-
-            if hf_checkpoint_path.is_dir():
-                # Local directory - files should be there
-                config_file = hf_checkpoint_path / f"configuration_{model_type}.py"
-                modeling_file = hf_checkpoint_path / f"modeling_{model_type}.py"
-            else:
-                # Remote model ID - download from HuggingFace Hub (cached automatically)
-                try:
-                    config_file = hf_hub_download(
-                        repo_id=pretrained_model_name_or_path,
-                        filename=f"configuration_{model_type}.py",
-                    )
-                except Exception:
-                    config_file = ""
-                try:
-                    modeling_file = hf_hub_download(
-                        repo_id=pretrained_model_name_or_path, filename=f"modeling_{model_type}.py"
-                    )
-                except Exception:
-                    modeling_file = ""
-
-            if config_file and os.path.exists(config_file):
-                shutil.copy(config_file, f"{save_directory}/configuration_{model_type}.py")
-            if modeling_file and os.path.exists(modeling_file):
-                shutil.copy(modeling_file, f"{save_directory}/modeling_{model_type}.py")
+        if is_last_stage_main_rank and self._hf_config is not None:
+            copy_remote_code(pretrained_model_name_or_path, save_directory)
 
         # Newer versions of VLLM expect config.json with hf_quant_config
         config_json_file = save_directory + "/config.json"
@@ -1254,7 +1166,7 @@ class GPTModelExporter:
 
 def export_mcore_gpt_to_hf(
     model: torch.nn.Module,
-    pretrained_model_name_or_path: str | os.PathLike | None = None,
+    pretrained_model_name_or_path: str | os.PathLike,
     export_extra_modules: bool = False,
     dtype: torch.dtype = torch.bfloat16,
     export_dir: Path | str = tempfile.gettempdir(),
@@ -1282,7 +1194,10 @@ def export_mcore_gpt_to_hf(
         trust_remote_code=trust_remote_code,
         moe_router_dtype=moe_router_dtype,
     )
-    exporter.save_pretrained(export_dir, pretrained_model_name_or_path)
+    if exporter.export_extra_modules:
+        exporter.save_pretrained_extra_modules(export_dir)
+    else:
+        exporter.save_pretrained(export_dir, pretrained_model_name_or_path)
 
 
 def import_mcore_gpt_from_hf(
