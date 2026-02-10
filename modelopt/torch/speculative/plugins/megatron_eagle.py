@@ -16,6 +16,7 @@
 """Plugin to add EAGLE support for Megatron-Core GPT model."""
 
 import copy
+import os
 import warnings
 from contextlib import contextmanager
 
@@ -54,6 +55,7 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.transformer.utils import sharded_state_dict_default
 from megatron.core.utils import make_tp_sharded_tensor_for_checkpoint
 from packaging.version import Version
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from ..eagle.conversion import EagleDMRegistry
 from ..eagle.eagle_model import EagleModel
@@ -693,6 +695,7 @@ class _DynamicEagleGPTModel(EagleModel):
         eagle_loss_decay_factor,
         eagle_architecture_config,
         eagle_decoder_type,
+        draft_vocab_cache,
     ):
         if self.config.pipeline_model_parallel_size > 1:
             warnings.warn(
@@ -715,6 +718,7 @@ class _DynamicEagleGPTModel(EagleModel):
             eagle_loss_decay_factor=eagle_loss_decay_factor,
             eagle_architecture_config=eagle_architecture_config,
             eagle_decoder_type=eagle_decoder_type,
+            draft_vocab_cache=draft_vocab_cache,
         )
 
         # sequence_parallel is not used in offline eagle
@@ -731,11 +735,18 @@ class _DynamicEagleGPTModel(EagleModel):
         self.eagle_config.hidden_size = self.config.hidden_size
         self.eagle_config.vocab_size = self.vocab_size
         self.eagle_config.max_sequence_length = self.max_sequence_length
-        self.eagle_config.draft_vocab_size = (
-            self.vocab_size
-            if self.eagle_config.draft_vocab_size is None
-            else self.eagle_config.draft_vocab_size
-        )
+
+        if draft_vocab_cache is not None:
+            if not os.path.isfile(draft_vocab_cache):
+                raise FileNotFoundError(
+                    f"Draft vocab cache provided but not found: {draft_vocab_cache}"
+                )
+            # Read draft_vocab_size from d2t without loading tensor
+            with FakeTensorMode():
+                d2t = torch.load(draft_vocab_cache, mmap=True)
+            self.eagle_config.draft_vocab_size = d2t.shape[0]
+        else:
+            self.eagle_config.draft_vocab_size = self.vocab_size
 
         if self.eagle_config.draft_vocab_size != self.eagle_config.vocab_size:
             assert eagle_self_logit_distillation, (
