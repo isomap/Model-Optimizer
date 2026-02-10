@@ -13,15 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Any, List, Optional
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
 
 
 @dataclass
 class Request:
-    system_prompt: str | None = None
-    turns: list[str] = field(default_factory=list)
-    mm_content: Any | None = None  # TODO
+    question_id: Optional[int] = None
+    category: Optional[str] = None
+    system_prompt: Optional[str] = None
+    turns: List[str] = field(default_factory=list)
+    mm_content: Optional[Any] = None  # TODO
 
     # not to be set by user
     output_turn_ids = None
@@ -30,8 +33,27 @@ class Request:
 
 class Dataset:
     def __init__(self, path, **kwargs):
-        self.data: list[Request] = []
+        self.data: List[Request] = []
         raise NotImplementedError
 
     def _preprocess(self):
+        raise NotImplementedError
+
+    @classmethod
+    def prepare_data(cls, output_dir: str | Path, **kwargs) -> Path:
+        """Prepare and save the dataset to the specified output directory.
+
+        Downloads any external data, resolves all references, and persists
+        the fully-resolved dataset so that subsequent loads are self-contained.
+
+        Args:
+            output_dir: Directory where the prepared data file will be saved.
+            **kwargs: Dataset-specific parameters (e.g. config_name, category).
+
+        Returns:
+            Path to the saved dataset file.
+
+        Raises:
+            NotImplementedError: Subclasses must override this method.
+        """
         raise NotImplementedError

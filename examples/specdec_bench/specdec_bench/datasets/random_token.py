@@ -13,23 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+from typing import List
 import numpy as np
-
 from .base import Dataset, Request
 
 
 class RandomToken(Dataset):
     def __init__(self, tokenizer, input_len, num_samples=20, **kwargs):
-        self.data: list[Request] = []  # list of list of questions.
+        self.data: List[Request] = []  # list of list of questions.
         self.num_samples = num_samples
         self.input_len = input_len
-        self.tokenizer = tokenizer
-        self._preprocess()
+        self._preprocess(tokenizer)
 
-    def _preprocess(self):
+    def _preprocess(self, tokenizer):
         np.random.seed(0)
-        tokenizer = self.tokenizer
         num_prompts = self.num_samples
         offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
         for i in range(num_prompts):

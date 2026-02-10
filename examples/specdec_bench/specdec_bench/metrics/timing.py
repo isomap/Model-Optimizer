@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import numpy as np
-
 from .base import Metric
 
 
@@ -52,7 +51,10 @@ class Timing(Metric):
         self.out["TTFT Time"] = compute_statistics(ttft_time)
         if tpot_time:
             self.out["Request Generation Step Time"] = compute_statistics(tpot_time)
-            self.out["Request Generation Tokens Per Second"] = compute_statistics(gen_tp_time)
+            self.out["Request Generation Tokens Per Second"] = compute_statistics(
+                gen_tp_time
+            )
+        self.out["Number of Output Tokens"] = compute_statistics(self.total_tokens)
         for k, v in self.out.items():
             print(k, v)
         self.write()

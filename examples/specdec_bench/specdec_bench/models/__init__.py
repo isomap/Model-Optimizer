@@ -13,7 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .base import Model
 from .sglang import SGLANGModel
-from .trtllm_torch_api import TRTLLMPYTModel
+from .specbench_medusa import SpecBenchMedusaModel
 from .vllm import VLLMModel
+from .trtllm_torch_api import TRTLLMPYTModel
+from .auto_deploy import AutoDeployModel
+
+__all__ = [
+    "SGLANGModel",
+    "SpecBenchMedusaModel",
+    "VLLMModel",
+    "TRTLLMPYTModel",
+    "AutoDeployModel",
+]

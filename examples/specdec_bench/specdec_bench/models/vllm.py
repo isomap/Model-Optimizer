@@ -13,16 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import time
-
 from .base import Model
+import time
+import asyncio
 
 try:
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
-    from vllm.inputs import TokensPrompt
     from vllm.v1.engine.async_llm import AsyncLLM
+    from vllm.inputs import TokensPrompt
 except ImportError:
     print("vllm is not installed.")
     vllm = None
@@ -31,37 +30,49 @@ except ImportError:
 class VLLMModel(Model):
     def __init__(self, model_dir, max_concurrent_requests, sampling_kwargs, **kwargs):
         specdec = None
-        if kwargs.get("speculative_algorithm") == "EAGLE3":
+        if kwargs.get("speculative_algorithm", None) == "EAGLE3":
             specdec = {
                 "method": "eagle3",
-                "model": kwargs.get("draft_model_dir"),
+                "model": kwargs.get("draft_model_dir", None),
                 "num_speculative_tokens": kwargs.get("speculative_num_steps", 3),
             }
-        elif kwargs.get("speculative_algorithm") == "EAGLE":
+        elif kwargs.get("speculative_algorithm", None) == "EAGLE":
             specdec = {
                 "method": "eagle",
-                "model": kwargs.get("draft_model_dir"),
+                "model": kwargs.get("draft_model_dir", None),
                 "num_speculative_tokens": kwargs.get("speculative_num_steps", 3),
             }
-        elif kwargs.get("speculative_algorithm") == "NGRAM":
+        elif kwargs.get("speculative_algorithm", None) == "NGRAM":
             specdec = {
                 "method": "ngram",
                 "num_speculative_tokens": kwargs.get("speculative_num_steps", 3),
-                "prompt_lookup_max": kwargs.get("max_matching_ngram_size", 3),  # No idea here
+                "prompt_lookup_max": kwargs.get(
+                    "max_matching_ngram_size", 3
+                ),  # No idea here
             }
-        elif kwargs.get("speculative_algorithm") == "DRAFT_TARGET":
+        elif kwargs.get("speculative_algorithm", None) == "DRAFT_TARGET":
             specdec = {
-                "method": "draft_target",
-                "model": kwargs.get("draft_model_dir"),
+                "method": "draft_model",
+                "model": kwargs.get("draft_model_dir", None),
                 "num_speculative_tokens": kwargs.get("speculative_num_steps", 3),
             }
-        elif kwargs.get("speculative_algorithm") == "MTP":
+            if kwargs.get("parallel_draft_block_sizes", None) is not None:
+                specdec["disable_padded_drafter_batch"] = True
+                specdec["parallel_draft_block_sizes"] = kwargs.get(
+                    "parallel_draft_block_sizes", None
+                )
+        elif kwargs.get("speculative_algorithm", None) == "MTP":
             specdec = {
                 "method": "mtp",
                 "num_speculative_tokens": kwargs.get("speculative_num_steps", 3),
             }
-        elif kwargs.get("speculative_algorithm") == "NONE":
+        elif kwargs.get("speculative_algorithm", None) == "NONE":
             specdec = None
+
+        if specdec is None:
+            num_speculative_tokens = 1
+        else:
+            num_speculative_tokens = specdec.get("num_speculative_tokens", 3)
         engine_args = AsyncEngineArgs(
             model=model_dir,
             trust_remote_code=True,
@@ -69,8 +80,10 @@ class VLLMModel(Model):
             enable_expert_parallel=kwargs.get("moe_expert_parallel_size", 1) > 1,
             enable_prefix_caching=kwargs.get("prefix_cache", False),
             speculative_config=specdec,
-            max_num_seqs=max_concurrent_requests,
+            max_num_seqs=max_concurrent_requests * num_speculative_tokens,
             skip_tokenizer_init=False,
+            async_scheduling=kwargs.get("async_scheduling", True),
+            enforce_eager=False,
         )
         self.model = AsyncLLM.from_engine_args(engine_args)
         self.sampling_kwargs = sampling_kwargs
@@ -88,10 +101,16 @@ class VLLMModel(Model):
         output_dict = {}
         self.sampling_config.max_tokens = max_length
         self.sampling_config.stop_token_ids = [end_id]
+        if end_id == -1:
+            self.sampling_config.ignore_eos = True
 
-        outputs, timing, full_tokens = await self.generate(prompt_ids, request_id, turn_id)
+        outputs, timing, full_tokens = await self.generate(
+            prompt_ids, request_id, turn_id
+        )
 
-        reformatted_output_ids = [[] for _ in range(self.sampling_kwargs.get("beam_width", 1))]
+        reformatted_output_ids = [
+            [] for _ in range(self.sampling_kwargs.get("beam_width", 1))
+        ]
         start = 0
         timing_to_strip = []
         for i in range(len(outputs)):
@@ -103,7 +122,9 @@ class VLLMModel(Model):
                     if outputs[i] - start == 1:
                         timing_to_strip.append(i)
                     else:
-                        reformatted_output_ids[0].append(full_tokens[start : outputs[i] - 1])
+                        reformatted_output_ids[0].append(
+                            full_tokens[start : outputs[i] - 1]
+                        )
                     break
             reformatted_output_ids[0].append(full_tokens[start : outputs[i]])
             start = outputs[i]

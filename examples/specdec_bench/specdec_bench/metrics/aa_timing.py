@@ -30,14 +30,17 @@ class AATiming(Metric):
             raise ImportError(
                 "Please install tiktoken to use the AATiming metric, or remove the metric from the run command"
             )
-        self.enc = tiktoken.get_encoding("cl100k_base")
+        self.enc = tiktoken.get_encoding("o200k_base")
         self.base_tokenizer = base_tokenizer
         self.total_tokens = []
 
     def process_step(self, step_outputs, request_id, turn_id):
         self.timing.append(step_outputs["token_times"])
         target_tokens = [
-            t for tok_list in step_outputs["output_ids"] for tok in tok_list for t in tok
+            t
+            for tok_list in step_outputs["output_ids"]
+            for tok in tok_list
+            for t in tok
         ]
         target_text = self.base_tokenizer.decode(target_tokens)
         target_tokens = self.enc.encode(target_text, disallowed_special=())
@@ -52,7 +55,9 @@ class AATiming(Metric):
             if len(times) > 2:
                 gen_tp_time.append((tokens - 1) / (times[-1] - times[1]))
         if gen_tp_time:
-            self.out["AA Generation Tokens Per Second"] = compute_statistics(gen_tp_time)
+            self.out["AA Generation Tokens Per Second"] = compute_statistics(
+                gen_tp_time
+            )
         for k, v in self.out.items():
             print(k, v)
         self.write()

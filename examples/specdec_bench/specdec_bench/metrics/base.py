@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
+import json
 
 
 class Metric:
@@ -38,7 +38,7 @@ class Metric:
         if self.out:
             filename = os.path.join(self.directory, f"{self.name}.json")
             if os.path.exists(filename):
-                with open(filename) as json_file:
+                with open(filename, "r") as json_file:
                     existing_data = json.load(json_file)
                 existing_data.append(self.out)
             else:

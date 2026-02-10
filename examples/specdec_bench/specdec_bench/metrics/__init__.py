@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .aa_timing import AATiming
 from .acceptance_rate import AcceptanceRate
-from .base import Metric
 from .mtbench import MTBench
 from .timing import Timing
+from .aa_timing import AATiming
+from .specbench import SpecBench
+
+__all__ = ["AcceptanceRate", "MTBench", "Timing", "AATiming", "SpecBench"]

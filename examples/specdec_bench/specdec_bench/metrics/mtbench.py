@@ -13,9 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
-
+import json
 from .acceptance_rate import AcceptanceRate
 
 MTBENCH_TOPICS = [
@@ -41,7 +40,9 @@ class MTBench(AcceptanceRate):
             turn_2 = turns[1]
             q_id = request_id
             mtbench_topic = MTBENCH_TOPICS[q_id // 10]
-            self.out["Request_AR"][request_id] = sum(turn_1 + turn_2) / len(turn_1 + turn_2)
+            self.out["Request_AR"][request_id] = sum(turn_1 + turn_2) / len(
+                turn_1 + turn_2
+            )
             self._get_lengths(turn_1, lengths)
             self._get_lengths(turn_2, lengths)
             print(mtbench_topic, sum(turn_1 + turn_2) / len(turn_1 + turn_2))
@@ -62,7 +63,9 @@ class MTBench(AcceptanceRate):
         self._format_write_output(text_outputs)
 
     def _format_write_output(self, outputs):
-        with open(os.path.join(self.directory, "mtbench_responses.jsonl"), "w") as outfile:
+        with open(
+            os.path.join(self.directory, "mtbench_responses.jsonl"), "w"
+        ) as outfile:
             for i, messages in enumerate(outputs):
                 q_id = i + 81
                 out_line = {}

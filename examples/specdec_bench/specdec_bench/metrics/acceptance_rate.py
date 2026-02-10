@@ -13,9 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
-
+import json
 from .base import Metric
 
 
@@ -52,7 +51,9 @@ class AcceptanceRate(Metric):
         print("Conditional acceptance rate")
         for k, v in lengths.items():
             print(k, running_len / sum_lengths / prev_ratio)
-            self.out["Conditional_Acceptance_Rate"][k] = running_len / sum_lengths / prev_ratio
+            self.out["Conditional_Acceptance_Rate"][k] = (
+                running_len / sum_lengths / prev_ratio
+            )
             prev_ratio = running_len / sum_lengths
             running_len -= v
 
@@ -85,7 +86,7 @@ class AcceptanceRate(Metric):
                 q_id = i
                 out_line = {}
                 out_line["question_id"] = q_id
-                if messages[0]["role"] == "system":
+                if "system" == messages[0]["role"]:
                     out_line["system_prompt"] = messages[0]["content"]
                 q_turns = [c["content"] for c in messages if c["role"] == "user"]
                 a_turns = [c["content"] for c in messages if c["role"] == "assistant"]
