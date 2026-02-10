@@ -87,6 +87,10 @@ QUANT_CFG_CHOICES: dict[str, dict[str, Any]] = {
     "nvfp4_svdquant": mtq.NVFP4_SVDQUANT_DEFAULT_CFG,
     "mxfp8": mtq.MXFP8_DEFAULT_CFG,
     "int4_gptq": mtq.INT4_BLOCKWISE_WEIGHT_ONLY_GPTQ_CFG,
+    "nvfp4_static_wo_gptq": mtq.NVFP4_STATIC_WO_GPTQ_CFG,
+    "nvfp4_static_wo": mtq.NVFP4_STATIC_WO_CFG,
+    "nvfp4_static_wo_gptq_lite": mtq.NVFP4_STATIC_WO_GPTQ_LITE_CFG,
+    "nvfp4_dynamic_wo_gptq": mtq.NVFP4_DYNAMIC_WO_CFG,
 }
 
 KV_QUANT_CFG_CHOICES = {
@@ -252,6 +256,10 @@ def auto_quantize(
             "nvfp4_mlp_only",
             "mxfp8",
             "int4_gptq",
+            "nvfp4_dynamic_wo_gptq",
+            "nvfp4_static_wo_gptq",
+            "nvfp4_static_wo",
+            "nvfp4_static_wo_gptq_lite",
         ]
         for args.qformat in qformat_list
     ), "One or more quantization formats provided are not supported for unified checkpoint export"
@@ -626,14 +634,16 @@ def export_quantized(
                     "Unified HF export format does not specify inference tensor parallel or pipeline parallel. "
                     "They will be set at deployment time."
                 )
-            if True:
+            if args.export_qdq_weights:
                 # Disable quantizers
-                # mtq.fold_weight(full_model)
-                # print("Folded weights")
+                if "gptq" not in args.qformat:
+                    mtq.fold_weight(full_model)
+                    print("Folded weights")
+
                 print("Disabling quantizers for perplexity evaluation (weights are already QDQ'ed)")
                 mtq.disable_quantizer(full_model, "*")
+
                 if True:
-                    # mtq.fold_weight(full_model)
                     import os
 
                     import torch.nn.functional as F
@@ -700,13 +710,13 @@ def export_quantized(
                     eval_data = _get_wikitext2(tokenizer, 2048)
                     ppl = _compute_perplexity(full_model, eval_data)
                     print(f"Wikitext-2 perplexity: {round(ppl, 2):.2f}")
-
-            breakpoint()
-
-            export_hf_checkpoint(
-                full_model,
-                export_dir=export_path,
-            )
+                    print(f"Saving model to {args.export_path}")
+                    full_model.save_pretrained(args.export_path)
+            else:
+                export_hf_checkpoint(
+                    full_model,
+                    export_dir=export_path,
+                )
 
         # Copy custom model files (Python files and JSON configs) if trust_remote_code is used
         copy_custom_model_files(args.pyt_ckpt_path, export_path, args.trust_remote_code)
@@ -944,6 +954,10 @@ def quantize_main(
                 "nvfp4_mlp_only",
                 "mxfp8",
                 "int4_gptq",
+                "nvfp4_static_wo_gptq",
+                "nvfp4_static_wo",
+                "nvfp4_static_wo_gptq_lite",
+                "nvfp4_dynamic_wo_gptq",
             ]
             or args.kv_cache_qformat in KV_QUANT_CFG_CHOICES
         ), f"Plain quantization format {args.qformat} not supported for HF export path"
@@ -1105,6 +1119,12 @@ def parse_args() -> argparse.Namespace:
             "utilizing the percentage of available GPU memory as specified by the value passed with gpu_max_mem flag."
             "Helpful in cases where device_map=auto loads model unevenly on GPUs causing GPU OOM during quantization."
         ),
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--export_qdq_weights",
+        help=("Used for GPTQ weights as is without compressed weights for deployment."),
         default=False,
         action="store_true",
     )
