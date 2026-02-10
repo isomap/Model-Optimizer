@@ -15,6 +15,8 @@
 
 import copy
 import glob
+import inspect
+import json
 import os
 import shutil
 import sys
@@ -26,6 +28,7 @@ import torch
 import transformers
 from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils import get_max_memory
+from safetensors.torch import load_file
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -131,6 +134,53 @@ def is_nemotron_vl(model_or_config):
     return any("nemotron" in arch.lower() for arch in architectures)
 
 
+def create_vlm_calibration_loop(full_model, calib_dataloader):
+    """Create a calibration loop for VLM models that handles multimodal inputs.
+
+    This function inspects the model's forward signature and filters batch kwargs
+    to only include supported parameters, then calls the appropriate forward method.
+
+    Args:
+        full_model: The full VLM model
+        calib_dataloader: DataLoader yielding multimodal batches
+
+    Returns:
+        A calibration function that can be passed to mtq.quantize()
+    """
+    # Import here to avoid circular dependency
+    from nemotron_vl_calib import safe_nemotron_vl_forward
+
+    def calibrate_loop(_model):
+        # Inspect model's forward signature to determine what parameters it accepts
+        forward_params = inspect.signature(full_model.forward).parameters
+        accepts_kwargs = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in forward_params.values()
+        )
+        allowed_keys = set(forward_params.keys())
+
+        full_model.eval()
+        with torch.no_grad():
+            for batch in calib_dataloader:
+                # Filter batch to only include parameters the model accepts
+                if accepts_kwargs:
+                    call_kwargs = batch
+                else:
+                    call_kwargs = {k: v for k, v in batch.items() if k in allowed_keys}
+                # Remove None values
+                call_kwargs = {k: v for k, v in call_kwargs.items() if v is not None}
+
+                # Use safe_nemotron_vl_forward for Nemotron Nano VL (embedding-injection style)
+                # For other VLMs (like Nemotron-Parse), use standard forward
+                if hasattr(full_model, "img_context_token_id"):
+                    # Nemotron Nano VL style
+                    safe_nemotron_vl_forward(full_model, call_kwargs)
+                else:
+                    # Standard encoder-decoder or other VLM architectures
+                    full_model(**call_kwargs)
+
+    return calibrate_loop
+
+
 def build_quant_cfg(
     qformat,
     kv_cache_qformat,
@@ -180,12 +230,17 @@ def build_quant_cfg(
         quant_cfg["quant_cfg"]["*image*"] = {"enable": False}
         quant_cfg["quant_cfg"]["*vision*"] = {"enable": False}
 
-        if model_type in ["qwen3moe", "qwen3next"] and qformat == "nvfp4":
-            # Disable the attention projection layers to retain accuracy
-            quant_cfg["quant_cfg"]["model*.*attn*in_proj*"] = {"enable": False}
-            quant_cfg["quant_cfg"]["model*.*attn*q_proj*"] = {"enable": False}
-            quant_cfg["quant_cfg"]["model*.*attn*k_proj*"] = {"enable": False}
-            quant_cfg["quant_cfg"]["model*.*attn*v_proj*"] = {"enable": False}
+    if model_type in ["qwen3moe", "qwen3next"] and qformat == "nvfp4":
+        # Disable the attention projection layers to retain accuracy
+        quant_cfg["quant_cfg"]["model*.*attn*in_proj*"] = {"enable": False}
+        quant_cfg["quant_cfg"]["model*.*attn*q_proj*"] = {"enable": False}
+        quant_cfg["quant_cfg"]["model*.*attn*k_proj*"] = {"enable": False}
+        quant_cfg["quant_cfg"]["model*.*attn*v_proj*"] = {"enable": False}
+
+    if model_type == "deepseek":
+        # Disable MLA quantization for accuracy.
+        quant_cfg["quant_cfg"]["*self_attn.q*"] = {"enable": False}
+        quant_cfg["quant_cfg"]["*self_attn.kv*"] = {"enable": False}
 
     return quant_cfg
 
@@ -259,6 +314,97 @@ def get_processor(
         return MllamaImageProcessor(processor, device)
 
     return None
+
+
+def load_mtp_weights(
+    model: torch.nn.Module, model_path: str
+) -> tuple[list[str], dict[str, torch.Tensor]]:
+    """Load MTP weights from the model checkpoint.
+
+    Some models store additional layers in separate safetensors files with non-standard
+    names (e.g., mtp.safetensors). HuggingFace's from_pretrained() may not load these
+    files even though they're referenced in model.safetensors.index.json.
+
+    This function detects such cases and explicitly loads the missing weights.
+
+    Args:
+        model: The loaded model that may be missing weights
+        model_path: Path to the model directory
+
+    Returns:
+        List of layer prefixes that were loaded from non-standard safetensors files.
+        These layers should typically be excluded from quantization.
+        Empty list if no additional weights were loaded.
+        Dictionary of MTP weights that were not loaded into the model state dict.
+    """
+    model_path = Path(model_path)
+    index_file = model_path / "model.safetensors.index.json"
+
+    if not index_file.exists():
+        return [], {}
+
+    # Load the index to find all referenced safetensors files
+    index = json.load(open(index_file))
+    weight_map = index["weight_map"]
+    # Find all files in weight_map whose key or value contains "mtp"
+    mtp_weight_map = {}
+    for k, v in weight_map.items():
+        if "mtp" in k or "mtp" in v:
+            mtp_weight_map.setdefault(v, []).append(k)
+
+    if not mtp_weight_map:
+        return [], {}
+
+    def _extract_layer_prefixes(keys):
+        mtp_layer_prefixes = set()
+        for key in keys:
+            parts = key.split(".")
+            for i, part in enumerate(parts):
+                if part == "layers" and i + 1 < len(parts) and parts[i + 1].isdigit():
+                    prefix = ".".join(parts[: i + 2])
+                    mtp_layer_prefixes.add(prefix)
+                    break
+
+        return mtp_layer_prefixes
+
+    # Flatten mtp_weight_map.values() (list of list of str) to a single list of str
+    mtp_keys = [k for keys in mtp_weight_map.values() for k in keys]
+    mtp_layer_prefixes = _extract_layer_prefixes(mtp_keys)
+
+    # Check which non-standard files exist and have missing weights
+    model_state = model.state_dict()
+    total_loaded = 0
+
+    not_in_state_dict = {}
+
+    for filename, mtp_keys in mtp_weight_map.items():
+        filepath = model_path / filename
+        if not filepath.exists():
+            continue
+
+        print(f"Loading {len(mtp_keys)} mtp weights from {filename}...")
+        weights = load_file(str(filepath), device="cpu")
+        weights = {k: v for k, v in weights.items() if k in mtp_keys}
+        # Load the MTP weights to the model state dict
+        in_state_dict = {k: weights[k] for k in weights if k in model_state}
+        not_in_state_dict = not_in_state_dict | {
+            k: weights[k] for k in weights if k not in model_state
+        }
+
+        if in_state_dict:
+            model.load_state_dict(in_state_dict, strict=False)
+            total_loaded += len(in_state_dict)
+
+    if total_loaded > 0:
+        print(
+            f"✓ Successfully loaded {total_loaded} MTP weights, "
+            f"{len(not_in_state_dict)} MTP weights not in model.state_dict"
+        )
+
+    if mtp_layer_prefixes:
+        print(f"✓ Detected MTP layers to exclude from quantization: {mtp_layer_prefixes}")
+
+    return list(mtp_layer_prefixes), not_in_state_dict
 
 
 def get_dtype(dtype):
@@ -346,6 +492,17 @@ def get_model(
                 device_map=device_map,
                 **model_kwargs,
             )
+        elif (
+            hasattr(hf_config, "quantization_config")
+            and hf_config.quantization_config.get("format", None) == "pack-quantized"
+        ):
+            torch_dtype = getattr(hf_config, "torch_dtype", torch.bfloat16)
+            model = AutoModelForCausalLM.from_pretrained(
+                ckpt_path,
+                device_map="auto",
+                trust_remote_code=trust_remote_code,
+                torch_dtype=torch_dtype,
+            )
         else:
             architecture = hf_config.architectures[0]
 
@@ -366,9 +523,9 @@ def get_model(
                 from_config = auto_model_module._from_config
 
             with init_empty_weights():
-                # When computing the device_map, assuming half precision by default,
+                # When computing the device_map, assuming bfloat16 precision by default,
                 # unless specified by the hf_config.
-                torch_dtype = getattr(hf_config, "torch_dtype", torch.float16)
+                torch_dtype = getattr(hf_config, "torch_dtype", torch.bfloat16)
                 model_kwargs2 = model_kwargs.copy()
                 if auto_model_module != AutoModelForCausalLM:
                     model_kwargs2.pop("trust_remote_code", None)

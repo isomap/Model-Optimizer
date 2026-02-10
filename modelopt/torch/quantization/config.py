@@ -234,6 +234,7 @@ INT4_BLOCKWISE_WEIGHT_ONLY_CFG = {
     "algorithm": "max",
 }
 
+
 INT4_AWQ_CFG = {
     "quant_cfg": {
         "*weight_quantizer": {
@@ -386,7 +387,6 @@ NVFP4_DEFAULT_CFG = {
     },
     "algorithm": "max",
 }
-
 
 NVFP4_AWQ_LITE_CFG = {
     "quant_cfg": {
@@ -742,7 +742,7 @@ class QuantizerAttributeConfig(ModeloptBaseConfig):
             raise ValueError(
                 "Supported FPx quantization formats: FP8 (E4M3, E5M2), FP6(E3M2, E2M3), FP4(E2M1)."
             )
-        elif num_bits != (4, 3) and (
+        elif num_bits not in [(4, 3), (2, 1)] and (
             block_sizes is None or block_sizes.get("type", None) != "dynamic"
         ):
             raise ValueError(
@@ -1017,15 +1017,18 @@ class MseCalibConfig(QuantizeAlgorithmConfig):
     reconstruction error of a tensor after uniform Q→DQ:
 
         s* = argmin_s  E[(X - DQ(Q(X; s)))^2],   X ∈ {weights | activations}
+
+    When fp8_scale_sweep is enabled, step_size is ignored.
     """
 
     method: Literal["mse"] = ModeloptField("mse")
 
-    num_steps: int | None = ModeloptField(
-        default=10,
-        ge=1,
-        title="Number of amax candidates to try.",
-        description="Number of amax candidates to search over for MSE minimization.",
+    step_size: float | None = ModeloptField(
+        default=0.1,
+        gt=0.0,
+        title="Step size for amax search.",
+        description="Step size between amax candidates. The number of candidates is computed as "
+        "ceil((stop_multiplier - start_multiplier) / step_size) + 1.",
     )
 
     start_multiplier: float | None = ModeloptField(
@@ -1040,6 +1043,14 @@ class MseCalibConfig(QuantizeAlgorithmConfig):
         gt=0.0,
         title="Ending multiplier for amax search.",
         description="Ending multiplier for amax search range (multiplies initial amax).",
+    )
+
+    fp8_scale_sweep: bool | None = ModeloptField(
+        default=False,
+        title="Enable FP8 scale sweep for NVFP4 per-block quantization.",
+        description="If True, sweep all 128 FP8 E4M3 scale values instead of using multipliers. "
+        "Only applies to NVFP4 weight quantization. When enabled, num_steps, step_size, "
+        "start_multiplier, and stop_multiplier are ignored.",
     )
 
     distributed_sync: bool | None = ModeloptField(
@@ -1176,6 +1187,44 @@ class SVDQuantConfig(QuantizeAlgorithmConfig):
             "Specifies the rank of the LoRA used in the SVDQuant method, "
             "which captures outliers from the original weights."
         ),
+    )
+
+
+class GPTQLiteConfig(QuantizeAlgorithmConfig):
+    """The config for GPTQ lite.
+
+    GPTQ lite is a variant of GPTQ that does not exactly follow the official GPTQ implementation.
+
+    GPTQ lite does not perform sequential quantization of layers. This means that the updated
+    activations are not used to process the next layer.
+
+    The default values are taken from the official GPTQ implementation:
+    https://github.com/IST-DASLab/FP-Quant/blob/d2e3092f968262c4de5fb050e1aef568a280dadd/src/quantization/gptq.py#L35
+
+    Note: This feature is currently experimental and may not translate to improved accuracy as expected.
+
+
+    """
+
+    method: Literal["gptq_lite"] = ModeloptField("gptq_lite")
+    percdamp: float | None = ModeloptField(
+        default=0.01,
+        gt=0.0,
+        le=1.0,
+        title="Percentage damping factor.",
+        description="The percentage of average Hessian diagonal used for damping.",
+    )
+    block_size: int | None = ModeloptField(
+        default=128,
+        title="Block size for GPTQ weight update.",
+        description="""The block size for GPTQ weight update, which must be a multiple of the
+        group_size used in the quantization.""",
+    )
+    hessian_state_path: str | None = ModeloptField(
+        default=None,
+        title="Path to the Hessian state file.",
+        description="""The path to the Hessian state file. If hessian path exists, we load from
+         hessian file instead of recomputing them.""",
     )
 
 

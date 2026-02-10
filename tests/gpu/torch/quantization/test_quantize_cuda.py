@@ -28,6 +28,47 @@ from _test_utils.torch.quantization.quantize_common import (
 import modelopt.torch.quantization as mtq
 from modelopt.torch.quantization.extensions import get_cuda_ext_mx
 
+NVFP4_WEIGHT_ACT_MSE_CFG = {
+    "quant_cfg": {
+        "*weight_quantizer": {
+            "num_bits": (2, 1),
+            "block_sizes": {-1: 16, "type": "static", "scale_bits": (4, 3)},
+            "axis": None,
+            "enable": True,
+        },
+        "*input_quantizer": {
+            "num_bits": (2, 1),
+            "block_sizes": {-1: 16, "type": "dynamic", "scale_bits": (4, 3)},
+            "axis": None,
+            "enable": True,
+        },
+    },
+    "algorithm": {
+        "method": "mse",
+        "step_size": 0.25,
+        "start_multiplier": 0.25,
+        "stop_multiplier": 2.0,
+    },
+}
+
+NVFP4_WEIGHT_MSE_FP8_SWEEP_CFG = {
+    "quant_cfg": {
+        "*weight_quantizer": {
+            "num_bits": (2, 1),
+            "block_sizes": {-1: 16, "type": "static", "scale_bits": (4, 3)},
+            "axis": None,
+            "enable": True,
+        },
+        "*input_quantizer": {
+            "enable": False,
+        },
+    },
+    "algorithm": {
+        "method": "mse",
+        "fp8_scale_sweep": True,
+    },
+}
+
 
 @pytest.mark.parametrize("model_cls", [SimpleLinear, SimpleConv, SimpleConvLinear])
 @pytest.mark.parametrize(
@@ -52,6 +93,8 @@ from modelopt.torch.quantization.extensions import get_cuda_ext_mx
         mtq.MXINT8_DEFAULT_CFG,
         mtq.NVFP4_KV_ROTATE_CFG,
         mtq.FP8_2D_BLOCKWISE_WEIGHT_ONLY_CFG,
+        NVFP4_WEIGHT_ACT_MSE_CFG,
+        NVFP4_WEIGHT_MSE_FP8_SWEEP_CFG,
     ],
 )
 def test_quantize(model_cls, config):
@@ -68,6 +111,8 @@ def test_quantize(model_cls, config):
         mtq.MXINT8_DEFAULT_CFG,
         mtq.NVFP4_KV_ROTATE_CFG,
         mtq.FP8_2D_BLOCKWISE_WEIGHT_ONLY_CFG,
+        NVFP4_WEIGHT_ACT_MSE_CFG,
+        NVFP4_WEIGHT_MSE_FP8_SWEEP_CFG,
     ]:
         if get_cuda_ext_mx() is None:
             pytest.skip("cuda_ext_mx is not available")
@@ -88,7 +133,10 @@ def test_quantize(model_cls, config):
         (SimpleLinear, mtq.INT8_SMOOTHQUANT_CFG),
         (SimpleLinear, mtq.W4A8_AWQ_BETA_CFG),
         (SimpleConvLinear, mtq.INT8_DEFAULT_CFG),
+        (SimpleLinear, NVFP4_WEIGHT_MSE_FP8_SWEEP_CFG),
+        (SimpleLinear, NVFP4_WEIGHT_ACT_MSE_CFG),
     ],
 )
 def test_save_restore(model_cls, quant_config):
-    save_restore_test(model_cls, "cuda", quant_config)
+    test_cpu_restore = quant_config == mtq.INT8_SMOOTHQUANT_CFG
+    save_restore_test(model_cls, "cuda", quant_config, test_cpu_restore=test_cpu_restore)
