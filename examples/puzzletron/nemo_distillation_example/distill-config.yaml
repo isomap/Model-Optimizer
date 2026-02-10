@@ -1,0 +1,12 @@
+#
+# Based on https://docs.nvidia.com/nemo-framework/user-guide/latest/model-optimization/distillation/distillation.html
+#
+
+logit_layers: ["output_layer", "output_layer"]
+intermediate_layer_pairs:
+  - ["decoder.layers.3", "decoder.layers.3"]
+  - ["decoder.layers.6", "decoder.layers.9"]
+  - ["decoder.layers.11", "decoder.layers.18"]
+  - ["decoder.final_layernorm", "decoder.final_layernorm"]
+skip_lm_loss: true
+kd_loss_scale: 1.0
