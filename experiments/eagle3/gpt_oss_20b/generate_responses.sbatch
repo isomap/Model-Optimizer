@@ -51,7 +51,6 @@ python3 $REPO_DIR/examples/speculative_decoding/scripts/server_generate.py \
     --output_path $OUTPUT_DIR/conversations.jsonl \
     --max_tokens 32000 \
     --temperature 1.0 \
-    --chat \
     --num_threads 256 \
     --log_empty_conversations
 
