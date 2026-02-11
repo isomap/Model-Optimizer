@@ -6,28 +6,23 @@
 #SBATCH --time=04:00:00
 #SBATCH --exclusive
 #SBATCH --mem=0
-#SBATCH --output=experiments/eagle3/data/logs/%j.out
-#SBATCH --error=experiments/eagle3/data/logs/%j.err
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 
 set -eo pipefail
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
-REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/data"
+VENV_DIR="$LUSTRE_BASE/eagle3/.venv"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"
 export HF_HOME
 
-# Clone or update repo
-if [ ! -d "$REPO_DIR" ]; then
-    git clone https://github.com/isomap/Model-Optimizer.git "$REPO_DIR"
-else
-    cd "$REPO_DIR" && git pull
+# Set up venv with datasets
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
 fi
-cd "$REPO_DIR"
-
-# Install dependencies
-pip install -e ".[hf]"
-pip install datasets tqdm
+source "$VENV_DIR/bin/activate"
+pip install --quiet datasets tqdm
 
 mkdir -p "$OUTPUT_DIR"
 
