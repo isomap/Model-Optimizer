@@ -17,7 +17,8 @@ DP_SIZE=4
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
-INPUT_DATA="$LUSTRE_BASE/eagle3/generated/qwen3_32b/conversations.jsonl"
+RAW_DATA="$LUSTRE_BASE/eagle3/generated/qwen3_32b/conversations.jsonl"
+INPUT_DATA="$LUSTRE_BASE/eagle3/generated/qwen3_32b/conversations_clean.jsonl"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_32b"
 
 CONTAINER="nvcr.io#nvidia/pytorch:25.01-py3"
@@ -32,6 +33,11 @@ export HF_HOME=$LUSTRE_BASE/.cache/huggingface
 
 # Only install deps needed for hidden state extraction (not modelopt, which upgrades torch and breaks torchvision)
 pip install --quiet 'transformers>=4.51' accelerate datasets
+
+# Validate and clean generated conversations
+python3 $REPO_DIR/experiments/eagle3/data/validate_generated.py \
+    --input $RAW_DATA \
+    --output $INPUT_DATA
 
 mkdir -p $OUTPUT_DIR
 
