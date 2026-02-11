@@ -47,7 +47,7 @@ while true; do
 done
 
 pip install --quiet openai tqdm
-python $REPO_DIR/experiments/eagle3/data/generate_completions.py \
+python3 $REPO_DIR/experiments/eagle3/data/generate_completions.py \
     --data_path $INPUT_DATA \
     --output_path $OUTPUT_DIR/conversations.jsonl \
     --max_tokens 32000 \

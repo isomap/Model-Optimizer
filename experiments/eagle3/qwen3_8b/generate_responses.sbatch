@@ -46,7 +46,7 @@ while true; do
 done
 
 pip install --quiet openai tqdm
-python $REPO_DIR/examples/speculative_decoding/scripts/server_generate.py \
+python3 $REPO_DIR/examples/speculative_decoding/scripts/server_generate.py \
     --data_path $INPUT_DATA \
     --output_path $OUTPUT_DIR/conversations.jsonl \
     --max_tokens 32000 \
