@@ -45,6 +45,9 @@ cat > "$INNER_SCRIPT" << INNER
 set -eo pipefail
 export HF_HOME=$LUSTRE_BASE/.cache/huggingface
 
+echo "Installing Mamba dependencies for Nemotron"
+pip install --quiet causal_conv1d mamba_ssm
+
 echo "Starting vLLM server for $MODEL"
 vllm serve $MODEL \\
     --tensor-parallel-size 8 \\

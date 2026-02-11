@@ -24,7 +24,7 @@ REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 SHARD_DIR="$LUSTRE_BASE/eagle3/data/shards"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/generated/$MODEL_DIR"
 LOG_DIR="$OUTPUT_DIR/logs"
-CONTAINER="vllm/vllm-openai:v0.8.5"
+CONTAINER="vllm/vllm-openai:v0.12.0"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 
