@@ -3,21 +3,28 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --partition=batch_long
-#SBATCH --time=08:00:00
+#SBATCH --partition=batch
+#SBATCH --time=04:00:00
 #SBATCH --exclusive
 #SBATCH --mem=0
-#SBATCH --output=%x_%j.out
-#SBATCH --error=%x_%j.err
+#SBATCH --output=%x_%j_%a.out
+#SBATCH --error=%x_%j_%a.err
+#SBATCH --array=0-55
+
+# Each array task processes one shard on its own node with a vLLM server.
+# 556k conversations / 10k per shard = 56 shards (indices 0-55).
+# Submit with: sbatch --account=<acct> generate_responses.sbatch
+# Resubmit safely - server_generate.py skips already-generated conversation IDs.
 
 set -eo pipefail
 
 MODEL="Qwen/Qwen3-32B"
 MODEL_DIR="qwen3_32b"
+SHARDS_PER_TASK=1
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
-INPUT_DATA="$LUSTRE_BASE/eagle3/data/dapo_prompts_x32.jsonl"
+SHARD_DIR="$LUSTRE_BASE/eagle3/data/shards"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/generated/$MODEL_DIR"
 
 CONTAINER="vllm/vllm-openai:v0.8.5"
@@ -46,14 +53,26 @@ while true; do
 done
 
 pip install --quiet openai tqdm
-python3 $REPO_DIR/examples/speculative_decoding/scripts/server_generate.py \
-    --data_path $INPUT_DATA \
-    --output_path $OUTPUT_DIR/conversations.jsonl \
-    --max_tokens 8192 \
-    --temperature 1.0 \
-    --num_threads 256 \
-    --log_empty_conversations
 
-echo 'Generation complete'
-wc -l $OUTPUT_DIR/conversations.jsonl
+# Process shard(s) assigned to this array task
+SHARD_IDX=$SLURM_ARRAY_TASK_ID
+for offset in \$(seq 0 \$(($SHARDS_PER_TASK - 1))); do
+    IDX=\$((SHARD_IDX * $SHARDS_PER_TASK + offset))
+    SHARD=\$(printf '$SHARD_DIR/train-%05d-%05d.jsonl' \"\$IDX\" \"\$IDX\")
+    OUTPUT=\$(printf '$OUTPUT_DIR/output-%05d.jsonl' \"\$IDX\")
+    if [ ! -f \"\$SHARD\" ]; then
+        echo \"Shard \$SHARD not found, skipping\"
+        continue
+    fi
+    echo \"Processing shard \$IDX: \$SHARD -> \$OUTPUT\"
+    python3 $REPO_DIR/examples/speculative_decoding/scripts/server_generate.py \
+        --data_path \"\$SHARD\" \
+        --output_path \"\$OUTPUT\" \
+        --max_tokens 32768 \
+        --temperature 1.0 \
+        --num_threads 256 \
+        --log_empty_conversations
+done
+
+echo 'Generation complete for array task $SLURM_ARRAY_TASK_ID'
 "

@@ -75,5 +75,31 @@ with open(output_path, 'w') as f:
 print(f'Wrote {total} entries ({len(unique_prompts)} prompts x {NUM_RESPONSES} responses) to {output_path}')
 "
 
+# Shard for multi-node generation (10k conversations per shard)
+SHARD_DIR="$OUTPUT_DIR/shards"
+mkdir -p "$SHARD_DIR"
+python -c "
+import json, os
+shard_dir = '$SHARD_DIR'
+input_path = '$OUTPUT_DIR/dapo_prompts_x${NUM_RESPONSES}.jsonl'
+max_per_shard = 10000
+shard_idx = 0
+line_count = 0
+outfile = open(os.path.join(shard_dir, f'train-{shard_idx:05d}-{shard_idx:05d}.jsonl'), 'w')
+with open(input_path) as f:
+    for line in f:
+        if line_count >= max_per_shard:
+            outfile.close()
+            shard_idx += 1
+            line_count = 0
+            outfile = open(os.path.join(shard_dir, f'train-{shard_idx:05d}-{shard_idx:05d}.jsonl'), 'w')
+        outfile.write(line)
+        line_count += 1
+outfile.close()
+print(f'Created {shard_idx + 1} shards in {shard_dir}')
+"
+
 echo "Data preparation complete."
 wc -l "$OUTPUT_DIR/dapo_prompts_x${NUM_RESPONSES}.jsonl"
+ls "$SHARD_DIR" | wc -l
+echo "shards created"
