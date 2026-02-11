@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eagle3-train-gpt-oss-120b
+#SBATCH --job-name=eagle3-train-nemotron-30b
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
@@ -12,8 +12,8 @@
 
 set -eo pipefail
 
-MODEL="openai/gpt-oss-120b"
-MODEL_DIR="gpt_oss_120b"
+MODEL="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+MODEL_DIR="nemotron_30b"
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"

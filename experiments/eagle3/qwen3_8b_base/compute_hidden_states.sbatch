@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eagle3-hs-qwen3-30b
+#SBATCH --job-name=eagle3-hs-qwen3-8b-base
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
@@ -12,13 +12,13 @@
 
 set -eo pipefail
 
-MODEL="Qwen/Qwen3-30B-A3B"
-DP_SIZE=4
+MODEL="Qwen/Qwen3-8B-Base"
+DP_SIZE=8
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
-INPUT_DATA="$LUSTRE_BASE/eagle3/generated/qwen3_30b/conversations.jsonl"
-OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_30b"
+INPUT_DATA="$LUSTRE_BASE/eagle3/generated/qwen3_8b_base/conversations.jsonl"
+OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_8b_base"
 
 CONTAINER="nvcr.io#nvidia/pytorch:25.01-py3"
 MOUNTS="$LUSTRE_BASE:$LUSTRE_BASE"
@@ -38,10 +38,8 @@ mkdir -p $OUTPUT_DIR
 split -n l/$DP_SIZE --numeric-suffixes=0 -d --additional-suffix=.jsonl $INPUT_DATA /tmp/eagle3-hs-part-
 
 for i in \$(seq 0 \$(($DP_SIZE - 1))); do
-    GPU_START=\$((i * 2))
-    GPU_END=\$((GPU_START + 1))
     PART_FILE=\$(printf '/tmp/eagle3-hs-part-%02d.jsonl' \"\$i\")
-    CUDA_VISIBLE_DEVICES=\$GPU_START,\$GPU_END python examples/speculative_decoding/collect_hidden_states/compute_hidden_states_hf.py \
+    CUDA_VISIBLE_DEVICES=\$i python examples/speculative_decoding/collect_hidden_states/compute_hidden_states_hf.py \
         --model $MODEL \
         --input-data \"\$PART_FILE\" \
         --output-dir $OUTPUT_DIR \

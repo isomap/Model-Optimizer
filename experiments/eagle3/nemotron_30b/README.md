@@ -1,6 +1,6 @@
-# Eagle3 - Qwen3-32B
+# Eagle3 - Nemotron-3-Nano-30B-A3B
 
-Eagle3 draft model training for `Qwen/Qwen3-32B` (instruct).
+Eagle3 draft model training for `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` (instruct).
 
 ## Pipeline
 

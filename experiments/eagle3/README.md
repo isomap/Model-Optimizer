@@ -1,43 +1,52 @@
 # Eagle3 Speculative Decoding Training
 
-Train Eagle3 draft models for 5 base models using offline training with DAPO-Math-17k dataset.
+Train Eagle3 draft models for 9 base models using offline training with DAPO-Math-17k dataset.
 
 ## Models
 
-| Model | HF ID | Hidden State DP | Training |
-|-------|--------|-----------------|----------|
-| Qwen3-8B | `Qwen/Qwen3-8B` | DP=8, 1 GPU/model | 1 node, 8 GPU FSDP2 |
-| Qwen3-30B-A3B | `Qwen/Qwen3-30B-A3B` | DP=4, 2 GPU/model | 1 node, 8 GPU FSDP2 |
-| Qwen3-32B | `Qwen/Qwen3-32B` | DP=4, 2 GPU/model | 1 node, 8 GPU FSDP2 |
-| GPT-OSS-20B | `openai/gpt-oss-20b` | DP=4, 2 GPU/model | 1 node, 8 GPU FSDP2 |
-| GPT-OSS-120B | `openai/gpt-oss-120b` | DP=1, 8 GPU/model | 1 node, 8 GPU FSDP2 |
+| Dir | HF ID | Type | HS DP | Gen TP |
+|-----|--------|------|-------|--------|
+| `qwen3_8b` | `Qwen/Qwen3-8B` | instruct | 8 (1 GPU) | 8 |
+| `qwen3_8b_base` | `Qwen/Qwen3-8B-Base` | base | 8 (1 GPU) | 8 |
+| `qwen3_30b` | `Qwen/Qwen3-30B-A3B` | instruct | 4 (2 GPU) | 8 |
+| `qwen3_30b_base` | `Qwen/Qwen3-30B-A3B-Base` | base | 4 (2 GPU) | 8 |
+| `qwen3_32b` | `Qwen/Qwen3-32B` | instruct | 4 (2 GPU) | 8 |
+| `gpt_oss_20b` | `openai/gpt-oss-20b` | instruct | 4 (2 GPU) | 8 |
+| `gpt_oss_120b` | `openai/gpt-oss-120b` | instruct | 1 (8 GPU) | 8 |
+| `nemotron_30b` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` | instruct | 4 (2 GPU) | 8 |
+| `nemotron_30b_base` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16` | base | 4 (2 GPU) | 8 |
 
-## Pipeline
+## Pipeline (4 phases)
 
-### Phase 1: Data Preparation
+### Phase 1: Data Preparation (shared, one-time)
 
 ```bash
 sbatch data/prepare_data.sbatch
 ```
 
-Converts DAPO-Math-17k (open-r1/DAPO-Math-17k-Processed) into conversation JSONL format.
+Deduplicates `BytedTsinghua-SIA/DAPO-Math-17k` (1.79M rows) to ~17k unique math prompts.
 
-### Phase 2: Compute Hidden States (per model)
+### Phase 2: Generate Responses (per model)
+
+```bash
+sbatch qwen3_8b/generate_responses.sbatch
+```
+
+Runs vLLM with TP=8 to generate long reasoning chains (up to 32k tokens) for each prompt.
+Instruct models use chat mode. Base models use completion mode.
+
+### Phase 3: Compute Hidden States (per model)
 
 ```bash
 sbatch qwen3_8b/compute_hidden_states.sbatch
-sbatch qwen3_30b/compute_hidden_states.sbatch
-# ...etc
 ```
 
-Runs base model inference to extract hidden states from layers [2, N/2, N-3] for offline training.
+Extracts hidden states from layers [2, N/2, N-3] for offline Eagle3 training. Max seq len 32768.
 
-### Phase 3: Train Eagle3 (per model)
+### Phase 4: Train Eagle3 (per model)
 
 ```bash
 sbatch qwen3_8b/train.sbatch
-sbatch qwen3_30b/train.sbatch
-# ...etc
 ```
 
-Offline Eagle3 training using pre-computed hidden states. 2 epochs, LR 1e-4, batch size 4, seq len 2048.
+Offline Eagle3 training with FSDP2 on 8 GPUs. 2 epochs, LR 1e-4, batch size 4.

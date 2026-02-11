@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eagle3-hs-qwen3-30b
+#SBATCH --job-name=eagle3-hs-nemotron-30b-base
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
@@ -12,13 +12,13 @@
 
 set -eo pipefail
 
-MODEL="Qwen/Qwen3-30B-A3B"
+MODEL="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16"
 DP_SIZE=4
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
-INPUT_DATA="$LUSTRE_BASE/eagle3/generated/qwen3_30b/conversations.jsonl"
-OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_30b"
+INPUT_DATA="$LUSTRE_BASE/eagle3/generated/nemotron_30b_base/conversations.jsonl"
+OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/nemotron_30b_base"
 
 CONTAINER="nvcr.io#nvidia/pytorch:25.01-py3"
 MOUNTS="$LUSTRE_BASE:$LUSTRE_BASE"

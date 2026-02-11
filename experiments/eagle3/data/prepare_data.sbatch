@@ -26,39 +26,54 @@ pip install --quiet datasets tqdm
 
 mkdir -p "$OUTPUT_DIR"
 
-# Prepare DAPO conversations into JSONL format
+# Load DAPO-Math-17k, deduplicate, expand to 32 responses per prompt
+NUM_RESPONSES=32
+
 python -c "
+import hashlib
 import json
 from pathlib import Path
 from datasets import load_dataset
 from tqdm import tqdm
 
-ds = load_dataset('open-r1/DAPO-Math-17k-Processed', 'en', split='train')
-output_path = Path('$OUTPUT_DIR/dapo.jsonl')
-conversations = []
+NUM_RESPONSES = $NUM_RESPONSES
 
-for entry in tqdm(ds, desc='Processing DAPO-Math-17k'):
-    conv_id = entry.get('extra_info', {}).get('index', '')
-    if not conv_id:
-        continue
-    prompt = entry.get('prompt', '').strip()
-    solution = str(entry.get('solution', '')).strip()
-    if not prompt or not solution:
-        continue
-    conversations.append({
-        'conversation_id': f'dapo-{conv_id}',
-        'conversations': [
-            {'role': 'user', 'content': prompt},
-            {'role': 'assistant', 'content': solution},
-        ],
-    })
+ds = load_dataset('BytedTsinghua-SIA/DAPO-Math-17k', split='train')
+print(f'Loaded {len(ds)} rows from DAPO-Math-17k')
 
+# Deduplicate by prompt content hash
+seen_hashes = set()
+unique_prompts = []
+for entry in tqdm(ds, desc='Deduplicating'):
+    prompt_msgs = entry.get('prompt', [])
+    if not prompt_msgs:
+        continue
+    content = prompt_msgs[0].get('content', '').strip()
+    if not content:
+        continue
+    h = hashlib.sha256(content.encode()).hexdigest()[:16]
+    if h in seen_hashes:
+        continue
+    seen_hashes.add(h)
+    unique_prompts.append({'content': content, 'hash': h})
+
+print(f'Found {len(unique_prompts)} unique prompts')
+
+# Expand: 32 copies per prompt with unique IDs for diverse generation at temp=1.0
+output_path = Path('$OUTPUT_DIR/dapo_prompts_x${NUM_RESPONSES}.jsonl')
+total = 0
 with open(output_path, 'w') as f:
-    for c in conversations:
-        f.write(json.dumps(c, ensure_ascii=False) + '\n')
+    for p in unique_prompts:
+        for r in range(NUM_RESPONSES):
+            entry = {
+                'conversations': [{'role': 'user', 'content': p['content']}],
+                'conversation_id': f\"dapo-{p['hash']}-r{r:02d}\",
+            }
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+            total += 1
 
-print(f'Wrote {len(conversations)} conversations to {output_path}')
+print(f'Wrote {total} entries ({len(unique_prompts)} prompts x {NUM_RESPONSES} responses) to {output_path}')
 "
 
 echo "Data preparation complete."
-wc -l "$OUTPUT_DIR/dapo.jsonl"
+wc -l "$OUTPUT_DIR/dapo_prompts_x${NUM_RESPONSES}.jsonl"

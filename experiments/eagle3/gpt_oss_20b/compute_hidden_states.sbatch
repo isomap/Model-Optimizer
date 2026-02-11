@@ -13,11 +13,11 @@
 set -eo pipefail
 
 MODEL="openai/gpt-oss-20b"
-DP_SIZE=4  # 20B needs ~2 GPUs per instance, so DP=4
+DP_SIZE=4
 
 LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
-INPUT_DATA="$LUSTRE_BASE/eagle3/data/dapo.jsonl"
+INPUT_DATA="$LUSTRE_BASE/eagle3/generated/gpt_oss_20b/conversations.jsonl"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/gpt_oss_20b"
 
 CONTAINER="nvcr.io#nvidia/pytorch:25.01-py3"
@@ -35,10 +35,8 @@ pip install --quiet 'transformers>=4.51' accelerate datasets
 
 mkdir -p $OUTPUT_DIR
 
-# Split input file for data-parallel processing
 split -n l/$DP_SIZE --numeric-suffixes=0 -d --additional-suffix=.jsonl $INPUT_DATA /tmp/eagle3-hs-part-
 
-# Each worker gets 2 GPUs via device_map=auto
 for i in \$(seq 0 \$(($DP_SIZE - 1))); do
     GPU_START=\$((i * 2))
     GPU_END=\$((GPU_START + 1))
@@ -47,13 +45,12 @@ for i in \$(seq 0 \$(($DP_SIZE - 1))); do
         --model $MODEL \
         --input-data \"\$PART_FILE\" \
         --output-dir $OUTPUT_DIR \
-        --max-seq-len 3072 &
+        --max-seq-len 32768 &
 done
 wait
 
 rm -f /tmp/eagle3-hs-part-*.jsonl
 
 echo 'Hidden state extraction complete for $MODEL'
-echo 'Output files:'
 ls $OUTPUT_DIR | wc -l
 "
