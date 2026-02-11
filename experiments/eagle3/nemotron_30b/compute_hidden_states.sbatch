@@ -34,11 +34,12 @@ export HF_HOME=$LUSTRE_BASE/.cache/huggingface
 
 # Only install deps needed for hidden state extraction (not modelopt, which upgrades torch and breaks torchvision)
 pip install --quiet 'transformers>=4.51' accelerate datasets
+pip install --no-cache-dir causal_conv1d mamba_ssm
 
 # Combine shard outputs into single file
 echo 'Combining shard outputs...'
 cat $GEN_DIR/output-*.jsonl > $RAW_DATA
-echo "Combined \$(wc -l < $RAW_DATA) lines"
+echo \"Combined \$(wc -l < $RAW_DATA) lines\"
 
 # Validate and clean generated conversations
 python3 $REPO_DIR/experiments/eagle3/data/validate_generated.py \
