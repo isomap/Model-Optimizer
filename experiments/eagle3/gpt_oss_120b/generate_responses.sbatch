@@ -60,6 +60,13 @@ for i in \$(seq 1 120); do
     sleep 5
 done
 
+# Abort if server never became ready
+resp=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo 000)
+if [ "\$resp" != "200" ]; then
+    echo "ERROR: vLLM server failed to start after 10 minutes. Aborting."
+    exit 1
+fi
+
 pip install --quiet openai tqdm
 
 echo "Processing shard $SHARD -> $OUTPUT"

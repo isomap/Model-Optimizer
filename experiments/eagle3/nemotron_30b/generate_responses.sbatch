@@ -24,7 +24,7 @@ REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 SHARD_DIR="$LUSTRE_BASE/eagle3/data/shards"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/generated/$MODEL_DIR"
 LOG_DIR="$OUTPUT_DIR/logs"
-CONTAINER="vllm/vllm-openai:v0.8.5"
+CONTAINER="vllm/vllm-openai:v0.12.0"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 
@@ -63,6 +63,13 @@ for i in \$(seq 1 120); do
     [ "\$resp" = "200" ] && echo "Server ready after \${i}x5s" && break
     sleep 5
 done
+
+# Abort if server never became ready
+resp=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo 000)
+if [ "\$resp" != "200" ]; then
+    echo "ERROR: vLLM server failed to start after 10 minutes. Aborting."
+    exit 1
+fi
 
 pip install --quiet openai tqdm
 
