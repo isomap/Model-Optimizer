@@ -15,8 +15,8 @@ set -eo pipefail
 MODEL="Qwen/Qwen3-8B"
 DP_SIZE=8  # 8B model fits on 1 GPU, so DP=8
 
-LUSTRE_BASE="/lustre/fsw/portfolios/general/users/$USER"
-REPO_DIR="$LUSTRE_BASE/repos/Model-Optimizer"
+LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
+REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 INPUT_DATA="$LUSTRE_BASE/eagle3/data/dapo.jsonl"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_8b"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"

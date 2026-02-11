@@ -11,15 +11,15 @@
 
 set -eo pipefail
 
-LUSTRE_BASE="/lustre/fsw/portfolios/general/users/$USER"
-REPO_DIR="$LUSTRE_BASE/repos/Model-Optimizer"
+LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
+REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/data"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"
 export HF_HOME
 
 # Clone or update repo
 if [ ! -d "$REPO_DIR" ]; then
-    git clone https://github.com/NVIDIA/Model-Optimizer.git "$REPO_DIR"
+    git clone https://github.com/isomap/Model-Optimizer.git "$REPO_DIR"
 else
     cd "$REPO_DIR" && git pull
 fi

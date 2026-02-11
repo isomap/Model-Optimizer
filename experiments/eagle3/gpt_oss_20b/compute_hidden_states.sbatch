@@ -15,8 +15,8 @@ set -eo pipefail
 MODEL="openai/gpt-oss-20b"
 DP_SIZE=4  # 20B needs ~2 GPUs per instance, so DP=4
 
-LUSTRE_BASE="/lustre/fsw/portfolios/general/users/$USER"
-REPO_DIR="$LUSTRE_BASE/repos/Model-Optimizer"
+LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
+REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 INPUT_DATA="$LUSTRE_BASE/eagle3/data/dapo.jsonl"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/gpt_oss_20b"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"

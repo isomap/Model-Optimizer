@@ -14,8 +14,8 @@ set -eo pipefail
 
 MODEL="openai/gpt-oss-20b"
 
-LUSTRE_BASE="/lustre/fsw/portfolios/general/users/$USER"
-REPO_DIR="$LUSTRE_BASE/repos/Model-Optimizer"
+LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
+REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 HIDDEN_STATES_DIR="$LUSTRE_BASE/eagle3/hidden_states/gpt_oss_20b"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/ckpts/gpt_oss_20b"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"

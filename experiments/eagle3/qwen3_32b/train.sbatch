@@ -14,8 +14,8 @@ set -eo pipefail
 
 MODEL="Qwen/Qwen3-32B"
 
-LUSTRE_BASE="/lustre/fsw/portfolios/general/users/$USER"
-REPO_DIR="$LUSTRE_BASE/repos/Model-Optimizer"
+LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
+REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 HIDDEN_STATES_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_32b"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/ckpts/qwen3_32b"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"

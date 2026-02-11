@@ -15,8 +15,8 @@ set -eo pipefail
 MODEL="openai/gpt-oss-120b"
 # 120B needs all 8 GPUs for one instance, no data parallelism
 
-LUSTRE_BASE="/lustre/fsw/portfolios/general/users/$USER"
-REPO_DIR="$LUSTRE_BASE/repos/Model-Optimizer"
+LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
+REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 INPUT_DATA="$LUSTRE_BASE/eagle3/data/dapo.jsonl"
 OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/gpt_oss_120b"
 HF_HOME="$LUSTRE_BASE/.cache/huggingface"
