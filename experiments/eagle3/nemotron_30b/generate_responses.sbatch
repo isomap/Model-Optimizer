@@ -45,16 +45,13 @@ cat > "$INNER_SCRIPT" << INNER
 set -eo pipefail
 export HF_HOME=$LUSTRE_BASE/.cache/huggingface
 
-echo "Installing Mamba dependencies for Nemotron"
-pip cache purge 2>/dev/null || true
-pip install --no-cache-dir causal_conv1d mamba_ssm
-
 echo "Starting vLLM server for $MODEL"
 vllm serve $MODEL \\
     --tensor-parallel-size 8 \\
     --served-model-name model \\
     --port 8000 --host 0.0.0.0 \\
     --trust-remote-code \\
+    --async-scheduling \\
     --max-model-len 32768 &
 
 echo "Waiting for vLLM health..."
