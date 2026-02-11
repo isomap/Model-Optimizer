@@ -46,7 +46,8 @@ set -eo pipefail
 export HF_HOME=$LUSTRE_BASE/.cache/huggingface
 
 echo "Installing Mamba dependencies for Nemotron"
-pip install --quiet causal_conv1d mamba_ssm
+pip cache purge 2>/dev/null || true
+pip install --no-cache-dir causal_conv1d mamba_ssm
 
 echo "Starting vLLM server for $MODEL"
 vllm serve $MODEL \\
