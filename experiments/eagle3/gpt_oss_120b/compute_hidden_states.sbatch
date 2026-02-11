@@ -30,8 +30,8 @@ srun --container-image="$CONTAINER" \
 set -eo pipefail
 export HF_HOME=$LUSTRE_BASE/.cache/huggingface
 
-pip install --quiet -e '.[hf]'
-pip install --quiet accelerate transformers datasets
+# Only install deps needed for hidden state extraction (not modelopt, which upgrades torch and breaks torchvision)
+pip install --quiet 'transformers>=4.51' accelerate datasets
 
 mkdir -p $OUTPUT_DIR
 
