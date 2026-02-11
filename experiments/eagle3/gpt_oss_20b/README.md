@@ -1,0 +1,19 @@
+# Eagle3 - GPT-OSS-20B
+
+Eagle3 draft model training for `openai/gpt-oss-20b`.
+
+## Hidden State Extraction
+
+DP=4 (2 GPUs per model instance via device_map=auto, 4 parallel workers). ~2h on 1 node.
+
+```bash
+sbatch compute_hidden_states.sbatch
+```
+
+## Training
+
+Offline Eagle3 training with FSDP2 on 8 GPUs. 2 epochs.
+
+```bash
+sbatch train.sbatch
+```
