@@ -1,7 +1,7 @@
-"""Generate completions for base models using the OpenAI completions API.
+"""Generate responses via vLLM's OpenAI-compatible API.
 
-Unlike server_generate.py (which uses chat completions), this script uses
-the /v1/completions endpoint for base models that lack a chat template.
+Supports both chat completions (instruct models) and plain completions (base models).
+Unlike server_generate.py, this always saves the response even if truncated at max_tokens.
 """
 
 import argparse
@@ -18,10 +18,13 @@ parser.add_argument("--data_path", type=str, required=True)
 parser.add_argument("--output_path", type=str, required=True)
 parser.add_argument("--num_threads", type=int, default=256)
 parser.add_argument("--temperature", type=float, default=1.0)
-parser.add_argument("--max_tokens", type=int, default=32000)
+parser.add_argument("--max_tokens", type=int, default=32768)
 parser.add_argument("--model", type=str, default="model")
 parser.add_argument("--url", type=str, default="http://localhost:8000/v1")
 parser.add_argument("--api_key", type=str, default="token-abc123")
+parser.add_argument(
+    "--chat", action="store_true", help="Use chat completions API (for instruct models)"
+)
 args = parser.parse_args()
 
 with open(args.data_path) as f:
@@ -54,13 +57,24 @@ def generate(entry):
     cid = entry["conversation_id"]
     prompt = entry["conversations"][0]["content"]
     try:
-        response = client.completions.create(
-            model=args.model,
-            prompt=prompt,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-        )
-        text = response.choices[0].text.strip()
+        if args.chat:
+            messages = [{"role": "user", "content": prompt}]
+            response = client.chat.completions.create(
+                model=args.model,
+                messages=messages,
+                max_tokens=args.max_tokens,
+                temperature=args.temperature,
+            )
+            text = response.choices[0].message.content.strip()
+        else:
+            response = client.completions.create(
+                model=args.model,
+                prompt=prompt,
+                max_tokens=args.max_tokens,
+                temperature=args.temperature,
+            )
+            text = response.choices[0].text.strip()
+
         if not text:
             result = {"conversation_id": cid}
         else:
@@ -78,11 +92,7 @@ def generate(entry):
 
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_threads) as pool:
-    futures = [
-        pool.submit(generate, e)
-        for e in data
-        if e["conversation_id"] not in finished_ids
-    ]
+    futures = [pool.submit(generate, e) for e in data if e["conversation_id"] not in finished_ids]
     for f in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
         f.result()
 

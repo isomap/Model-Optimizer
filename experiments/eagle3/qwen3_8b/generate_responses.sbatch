@@ -65,13 +65,13 @@ for offset in \$(seq 0 \$(($SHARDS_PER_TASK - 1))); do
         continue
     fi
     echo \"Processing shard \$IDX: \$SHARD -> \$OUTPUT\"
-    python3 $REPO_DIR/examples/speculative_decoding/scripts/server_generate.py \
+    python3 $REPO_DIR/experiments/eagle3/data/generate_completions.py \
         --data_path \"\$SHARD\" \
         --output_path \"\$OUTPUT\" \
         --max_tokens 32768 \
         --temperature 1.0 \
         --num_threads 256 \
-        --log_empty_conversations
+        --chat
 done
 
 echo 'Generation complete for array task $SLURM_ARRAY_TASK_ID'
