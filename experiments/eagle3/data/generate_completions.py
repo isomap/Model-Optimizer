@@ -18,7 +18,13 @@ parser.add_argument("--data_path", type=str, required=True)
 parser.add_argument("--output_path", type=str, required=True)
 parser.add_argument("--num_threads", type=int, default=256)
 parser.add_argument("--temperature", type=float, default=1.0)
-parser.add_argument("--max_tokens", type=int, default=32768)
+parser.add_argument("--max_tokens", type=int, default=32000)
+parser.add_argument(
+    "--max_model_len",
+    type=int,
+    default=32768,
+    help="Model context window for auto-adjusting max_tokens",
+)
 parser.add_argument("--model", type=str, default="model")
 parser.add_argument("--url", type=str, default="http://localhost:8000/v1")
 parser.add_argument("--api_key", type=str, default="token-abc123")
@@ -56,13 +62,17 @@ if done:
 def generate(entry):
     cid = entry["conversation_id"]
     prompt = entry["conversations"][0]["content"]
+    # Estimate prompt tokens (~4 chars/token) and cap max_tokens to fit context
+    est_prompt_tokens = len(prompt) // 3 + 100  # conservative estimate
+    max_tokens = min(args.max_tokens, args.max_model_len - est_prompt_tokens)
+    max_tokens = max(max_tokens, 256)  # minimum generation length
     try:
         if args.chat:
             messages = [{"role": "user", "content": prompt}]
             response = client.chat.completions.create(
                 model=args.model,
                 messages=messages,
-                max_tokens=args.max_tokens,
+                max_tokens=max_tokens,
                 temperature=args.temperature,
             )
             text = response.choices[0].message.content.strip()
@@ -70,7 +80,7 @@ def generate(entry):
             response = client.completions.create(
                 model=args.model,
                 prompt=prompt,
-                max_tokens=args.max_tokens,
+                max_tokens=max_tokens,
                 temperature=args.temperature,
             )
             text = response.choices[0].text.strip()
