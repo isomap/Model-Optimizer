@@ -165,16 +165,17 @@ def main(args: argparse.Namespace) -> None:
                 tokenizer_output = tokenizer.apply_chat_template(
                     conversation, return_tensors="pt", add_generation_template=False
                 )
-                # Handle both dict and tensor outputs
-                if isinstance(tokenizer_output, dict):
+                # transformers returns BatchEncoding which acts like a dict
+                # Extract input_ids tensor
+                if hasattr(tokenizer_output, "input_ids"):
+                    input_ids = tokenizer_output.input_ids
+                elif isinstance(tokenizer_output, dict):
                     input_ids = tokenizer_output["input_ids"]
-                else:
+                elif isinstance(tokenizer_output, torch.Tensor):
                     input_ids = tokenizer_output
-
-                # Ensure it's a tensor
-                if not isinstance(input_ids, torch.Tensor):
+                else:
                     print(
-                        f"Unexpected tokenizer output type for {conv_id}-r{resp_id}: {type(input_ids)}"
+                        f"Unexpected tokenizer output type for {conv_id}-r{resp_id}: {type(tokenizer_output)}"
                     )
                     continue
 
