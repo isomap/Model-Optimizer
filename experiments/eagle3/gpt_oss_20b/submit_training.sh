@@ -3,15 +3,16 @@
 
 set -eo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACCOUNT="coreai_horizon_dilations"
 NUM_RUNS=4
 
-JOB1=$(sbatch --account=$ACCOUNT --parsable experiments/eagle3/gpt_oss_20b/train.sbatch)
+JOB1=$(sbatch --account=$ACCOUNT --parsable "$SCRIPT_DIR/train.sbatch")
 echo "Submitted job 1: $JOB1"
 
 PREV_JOB=$JOB1
 for i in $(seq 2 $NUM_RUNS); do
-    NEXT_JOB=$(sbatch --account=$ACCOUNT --dependency=afterok:$PREV_JOB --parsable experiments/eagle3/gpt_oss_20b/train.sbatch)
+    NEXT_JOB=$(sbatch --account=$ACCOUNT --dependency=afterok:$PREV_JOB --parsable "$SCRIPT_DIR/train.sbatch")
     echo "Submitted job $i: $NEXT_JOB (depends on $PREV_JOB)"
     PREV_JOB=$NEXT_JOB
 done
