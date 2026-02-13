@@ -162,9 +162,14 @@ def main(args: argparse.Namespace) -> None:
 
             # Tokenize
             try:
-                input_ids = tokenizer.apply_chat_template(
+                tokenizer_output = tokenizer.apply_chat_template(
                     conversation, return_tensors="pt", add_generation_template=False
                 )
+                # Handle both dict and tensor outputs
+                if isinstance(tokenizer_output, dict):
+                    input_ids = tokenizer_output["input_ids"]
+                else:
+                    input_ids = tokenizer_output
             except Exception as e:
                 print(f"Tokenization error for {conv_id}-r{resp_id}: {e}")
                 continue
