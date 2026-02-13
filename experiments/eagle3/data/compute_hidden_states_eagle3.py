@@ -170,11 +170,21 @@ def main(args: argparse.Namespace) -> None:
                     input_ids = tokenizer_output["input_ids"]
                 else:
                     input_ids = tokenizer_output
+
+                # Ensure it's a tensor
+                if not isinstance(input_ids, torch.Tensor):
+                    print(
+                        f"Unexpected tokenizer output type for {conv_id}-r{resp_id}: {type(input_ids)}"
+                    )
+                    continue
+
+                num_tokens = input_ids.shape[1]
             except Exception as e:
                 print(f"Tokenization error for {conv_id}-r{resp_id}: {e}")
-                continue
+                import traceback
 
-            num_tokens = input_ids.shape[1]
+                traceback.print_exc()
+                continue
             if num_tokens <= 10 or num_tokens > args.max_seq_len:
                 num_skipped_too_long += 1
                 continue
