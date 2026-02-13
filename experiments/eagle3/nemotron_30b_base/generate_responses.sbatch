@@ -52,6 +52,7 @@ vllm serve $MODEL \\
     --port 8000 --host 0.0.0.0 \\
     --trust-remote-code \\
     --async-scheduling \\
+    --enforce-eager \\
     --max-model-len 32768 &
 
 echo "Waiting for vLLM health..."
