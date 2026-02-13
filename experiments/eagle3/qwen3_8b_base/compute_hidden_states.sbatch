@@ -19,8 +19,8 @@ LUSTRE_BASE="/lustre/fsw/portfolios/coreai/users/$USER"
 REPO_DIR="$LUSTRE_BASE/ghq/github.com/isomap/Model-Optimizer"
 GEN_DIR="$LUSTRE_BASE/eagle3/generated/qwen3_8b_base"
 RAW_DATA="$GEN_DIR/conversations_combined.jsonl"
-INPUT_DATA="$GEN_DIR/conversations_clean.jsonl"
-OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states/qwen3_8b_base"
+AGGREGATED_DATA="$GEN_DIR/conversations_aggregated.jsonl"
+OUTPUT_DIR="$LUSTRE_BASE/eagle3/hidden_states_v2/qwen3_8b_base"
 
 CONTAINER="nvcr.io#nvidia/pytorch:25.01-py3"
 MOUNTS="$LUSTRE_BASE:$LUSTRE_BASE"
@@ -40,27 +40,33 @@ echo 'Combining shard outputs...'
 cat $GEN_DIR/output-*.jsonl > $RAW_DATA
 echo \"Combined \$(wc -l < $RAW_DATA) lines\"
 
-# Validate and clean generated conversations
-python3 $REPO_DIR/experiments/eagle3/data/validate_generated.py \
+# Aggregate responses (32 variants per base conversation -> 1 entry)
+echo 'Aggregating responses...'
+python3 $REPO_DIR/experiments/eagle3/data/aggregate_responses.py \
     --input $RAW_DATA \
-    --output $INPUT_DATA
+    --output $AGGREGATED_DATA
 
 mkdir -p $OUTPUT_DIR
 
-split -n l/$DP_SIZE --numeric-suffixes=0 -d --additional-suffix=.jsonl $INPUT_DATA /tmp/eagle3-hs-part-
+# Split aggregated data for data-parallel processing
+split -n l/$DP_SIZE --numeric-suffixes=0 -d --additional-suffix=.jsonl $AGGREGATED_DATA /tmp/eagle3-hs-part-
 
+# Run Eagle3-optimized hidden state extraction in parallel
 for i in \$(seq 0 \$(($DP_SIZE - 1))); do
     PART_FILE=\$(printf '/tmp/eagle3-hs-part-%02d.jsonl' \"\$i\")
-    CUDA_VISIBLE_DEVICES=\$i python examples/speculative_decoding/collect_hidden_states/compute_hidden_states_hf.py \
+    CUDA_VISIBLE_DEVICES=\$i python $REPO_DIR/experiments/eagle3/data/compute_hidden_states_eagle3.py \
         --model $MODEL \
         --input-data \"\$PART_FILE\" \
         --output-dir $OUTPUT_DIR \
-        --max-seq-len 32768 &
+        --max-seq-len 32768 \
+        --dp-rank \$i \
+        --dp-world-size $DP_SIZE &
 done
 wait
 
 rm -f /tmp/eagle3-hs-part-*.jsonl
 
 echo 'Hidden state extraction complete for $MODEL'
-ls $OUTPUT_DIR | wc -l
+echo \"Output files: \$(ls $OUTPUT_DIR | wc -l)\"
+echo \"Total size: \$(du -sh $OUTPUT_DIR | cut -f1)\"
 "
